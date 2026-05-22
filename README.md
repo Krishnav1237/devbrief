@@ -4,9 +4,9 @@ An AI agent that monitors your library stack, scrapes changelogs daily, and deli
 
 Instead of manually checking GitHub releases, Twitter, and docs across the 10–30 libraries you actively use, DevBrief collapses that into a 2-minute voice briefing each morning.
 
-## How It Works
+---
 
-DevBrief runs a sequential pipeline on a daily cron schedule (or on demand):
+## How It Works
 
 ```mermaid
 flowchart TD
@@ -22,209 +22,183 @@ flowchart TD
     classDef output fill:#533483,color:#ffffff,stroke:#1a1a2e
 ```
 
-Each step is fault-isolated — a TTS failure still produces a text-only digest, and a single library's scrape failure doesn't block others.
+Every step is fault-isolated. If TTS fails, you still get a text digest. If one library's scrape fails, the others still process normally.
+
+---
+
+## Quick Start
+
+```bash
+git clone <repo-url>
+cd devbrief
+npm install
+cp .env.example .env
+```
+
+Fill in your `.env` (see [Environment Variables](#environment-variables) below), then:
+
+```bash
+# Add libraries to monitor
+npx devbrief stack add react --urls "https://github.com/facebook/react/releases"
+npx devbrief stack add next --urls "https://github.com/vercel/next.js/releases,https://nextjs.org/blog"
+
+# Run the pipeline
+npx devbrief run
+```
+
+That's it. You'll see scraped changes, deduplication results, LLM classification, and (if configured) an audio briefing generated.
+
+---
 
 ## Prerequisites
 
-- **Node.js 18+**
-- **ffmpeg** (required for audio concatenation)
-- **Tailscale** (for secure self-hosted access)
+| Dependency | Why | Install |
+|---|---|---|
+| **Node.js 18+** | Runtime | [nodejs.org](https://nodejs.org) |
+| **ffmpeg** | Stitches audio chunks into a single MP3 | `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu) |
+| **Tailscale** | Secure access to the HTTP server without exposing ports | [tailscale.com/download](https://tailscale.com/download) |
 
-### Installing ffmpeg
-
-**macOS:**
-
-```bash
-brew install ffmpeg
-```
-
-**Ubuntu / Debian:**
-
-```bash
-sudo apt update && sudo apt install ffmpeg
-```
-
-**Fedora:**
-
-```bash
-sudo dnf install ffmpeg
-```
-
-### Installing Tailscale
-
-Follow the official guide at [https://tailscale.com/download](https://tailscale.com/download) to install and join your tailnet.
-
-## Installation
-
-```bash
-# Clone the repository
-git clone <repo-url>
-cd devbrief
-
-# Install dependencies
-npm install
-
-# Copy the example environment file
-cp .env.example .env
-
-# Edit .env and fill in your API keys (see Environment Variables below)
-```
+---
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and configure the following:
+Copy `.env.example` to `.env`. The variables are grouped by what they enable.
 
-| Variable | Required | Description | Default |
-|----------|----------|-------------|---------|
-| `GROQ_API_KEY` | Yes (if using Groq) | API key for Groq LLM provider | — |
-| `OLLAMA_BASE_URL` | Yes (if using Ollama) | Base URL for local Ollama instance | — |
-| `OLOSTEP_API_KEY` | Yes | API key for Olostep web scraping | — |
-| `SARVAM_API_KEY` | Yes | API key for Sarvam AI text-to-speech | — |
-| `PAPERCLIP_API_KEY` | Conditional | API key for Paperclip publishing (falls back to local hosting if not set) | — |
-| `HYDRADB_API_KEY` | Optional | API key for HydraDB cloud knowledge store | — |
-| `HYDRADB_TENANT_ID` | Optional | Tenant ID for HydraDB (required if HYDRADB_API_KEY is set) | — |
-| `TAILSCALE_IP` | Optional | Tailscale IP to bind to (auto-detected from `100.x.x.x` interfaces if not set) | Auto-detect |
-| `SMTP_HOST` | Optional | SMTP server hostname for email notifications | — |
-| `SMTP_PORT` | Optional | SMTP server port | — |
-| `SMTP_USER` | Optional | SMTP authentication username | — |
-| `SMTP_PASS` | Optional | SMTP authentication password | — |
-| `DISCORD_WEBHOOK_URL` | Optional | Discord webhook URL for notifications | — |
-| `DEVBRIEF_PORT` | Optional | HTTP server port | `7890` |
-| `DEVBRIEF_CRON` | Optional | Cron expression for scheduled runs | `0 7 * * *` |
-| `TZ` | Optional | Timezone for cron scheduling | System local |
+### Required (pipeline won't run without these)
 
-**Notes:**
-- At least one LLM provider is required: set either `GROQ_API_KEY` or `OLLAMA_BASE_URL`.
-- SMTP variables are only needed if you configure an email notification channel.
-- The cron schedule runs in the system's local timezone. Set `TZ` to override (e.g., `TZ=America/New_York`).
+| Variable | Description |
+|---|---|
+| `OLOSTEP_API_KEY` | Olostep web scraping — renders JS-heavy pages and returns markdown |
+| `SARVAM_API_KEY` | Sarvam AI text-to-speech — converts briefing scripts to audio |
+
+You also need **at least one** LLM provider:
+
+| Variable | Description |
+|---|---|
+| `GROQ_API_KEY` | Groq cloud LLM (uses Llama 3.3) |
+| `OLLAMA_BASE_URL` | Local Ollama instance (e.g. `http://localhost:11434`) |
+
+### Optional — Cloud Sync
+
+These enable cross-device persistence via HydraDB. Without them, DevBrief works fully in local-only mode (SQLite).
+
+| Variable | Description |
+|---|---|
+| `HYDRADB_API_KEY` | HydraDB cloud knowledge store |
+| `HYDRADB_TENANT_ID` | Your HydraDB tenant (required if API key is set) |
+
+### Optional — Notifications
+
+Configure these only if you want push notifications after each run.
+
+| Variable | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord channel webhook |
+| `SMTP_HOST` | SMTP server for email notifications |
+| `SMTP_PORT` | SMTP port |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASS` | SMTP password |
+
+### Optional — Server Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `TAILSCALE_IP` | Auto-detect | Tailscale IP to bind to (finds `100.x.x.x` automatically) |
+| `DEVBRIEF_PORT` | `7890` | HTTP server port |
+| `DEVBRIEF_CRON` | `0 7 * * *` | Cron expression (default: 7 AM daily) |
+| `TZ` | System local | Timezone for cron (e.g. `America/New_York`) |
+
+---
 
 ## CLI Usage
 
 ### Managing Your Library Stack
 
-Add a library to monitor:
-
 ```bash
+# Add a library (single URL)
 npx devbrief stack add react --urls "https://github.com/facebook/react/releases"
-```
 
-Add a library with multiple changelog URLs:
-
-```bash
+# Add with multiple changelog sources
 npx devbrief stack add next --urls "https://github.com/vercel/next.js/releases,https://nextjs.org/blog"
-```
 
-Update URLs for an existing library (upsert behavior):
-
-```bash
+# Update URLs for an existing library (upsert — replaces URLs, keeps history)
 npx devbrief stack add react --urls "https://github.com/facebook/react/releases,https://react.dev/blog"
-```
 
-Remove a library:
-
-```bash
+# Remove a library
 npx devbrief stack remove react
-```
 
-List all monitored libraries:
-
-```bash
+# List everything you're monitoring
 npx devbrief stack list
 ```
 
-### Running the Pipeline Manually
-
-Run the full pipeline from the command line without starting the HTTP server:
+### Running the Pipeline
 
 ```bash
 npx devbrief run
 ```
 
-This triggers the pipeline with `trigger_type: 'manual'` and prints a summary to stdout.
+This runs the full pipeline once (scrape → deduplicate → summarize → script → TTS → publish → notify) and prints a summary:
 
-## Server Usage
+```
+Run ID:    a1b2c3d4-...
+Status:    completed
+Changes:   3 new
+Errors:    0
+Audio:     ~/.devbrief/audio/a1b2c3d4.mp3
+```
 
-### Starting the Server
+---
 
-Start the HTTP server and cron scheduler:
+## Server Mode
+
+For always-on operation, start the HTTP server with the built-in cron scheduler:
 
 ```bash
-npm start
+npm start        # production (compiled)
+npm run dev      # development (tsx, auto-reload)
 ```
 
-Or in development mode:
+The server binds to your Tailscale IP on port 7890. The cron scheduler triggers the pipeline automatically based on `DEVBRIEF_CRON`.
+
+**Authentication:** Tailscale tailnet membership is the only auth. If your device is on the tailnet, you have access. No passwords or tokens needed.
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/trigger` | Start a pipeline run. Returns `202` with `{ "run_id": "..." }`. Returns `409` if already running. |
+| `GET` | `/runs` | List all runs (newest first) |
+| `GET` | `/runs/:run_id` | Get full details for a specific run |
+| `GET` | `/digest/:run_id` | Get the briefing script + audio URL as JSON |
+| `GET` | `/audio/:run_id.mp3` | Stream/download the audio briefing |
+
+Example — trigger a run and get the audio:
 
 ```bash
-npm run dev
+# Trigger
+curl -X POST http://100.x.x.x:7890/trigger
+# → {"run_id": "a1b2c3d4-..."}
+
+# Download audio once complete
+curl http://100.x.x.x:7890/audio/a1b2c3d4.mp3 --output briefing.mp3
 ```
 
-The server binds to your Tailscale IP on port 7890 (configurable via `DEVBRIEF_PORT`). The cron scheduler starts automatically and triggers the pipeline based on `DEVBRIEF_CRON` (default: 7 AM daily).
+---
 
-**Authentication:** Tailscale tailnet membership is the sole authentication mechanism. All endpoints are accessible only to devices on your tailnet — no additional app-level auth is needed.
+## Notifications (Optional)
 
-### HTTP Endpoints
-
-**Trigger a pipeline run:**
-
-```bash
-curl -X POST http://<tailscale-ip>:7890/trigger
-```
-
-Returns `202` with `{ "run_id": "<uuid>" }` on success, or `409` if a run is already in progress.
-
-**List all runs:**
-
-```bash
-curl http://<tailscale-ip>:7890/runs
-```
-
-Returns an array of run records ordered by `triggered_at` descending.
-
-**Get details for a specific run:**
-
-```bash
-curl http://<tailscale-ip>:7890/runs/<run_id>
-```
-
-Returns the full run record including status, libraries processed, change count, errors, and links.
-
-**Get the digest for a run:**
-
-```bash
-curl http://<tailscale-ip>:7890/digest/<run_id>
-```
-
-Returns a JSON response with the briefing script text and audio URL:
-
-```json
-{
-  "run_id": "abc-123",
-  "briefing_script": "Good morning! Here's your DevBrief for...",
-  "audio_url": "http://<tailscale-ip>:7890/audio/abc-123.mp3",
-  "generated_at": "2025-01-15T07:00:00.000Z"
-}
-```
-
-**Stream the audio briefing:**
-
-```bash
-curl http://<tailscale-ip>:7890/audio/<run_id>.mp3 --output briefing.mp3
-```
-
-## Notification Configuration
-
-DevBrief supports three notification channels: webhook, Discord, and email. Configure them by editing `~/.devbrief/notification-config.json`:
+DevBrief can notify you after each run via webhook, Discord, or email. Configure channels in `~/.devbrief/notification-config.json`:
 
 ```json
 {
   "channels": [
     {
       "type": "webhook",
-      "url": "https://your-webhook-endpoint.example.com/devbrief"
+      "url": "https://your-endpoint.example.com/devbrief"
     },
     {
       "type": "discord",
-      "webhookUrl": "https://discord.com/api/webhooks/1234567890/abcdefg"
+      "webhookUrl": "https://discord.com/api/webhooks/..."
     },
     {
       "type": "email",
@@ -232,10 +206,7 @@ DevBrief supports three notification channels: webhook, Discord, and email. Conf
         "host": "smtp.gmail.com",
         "port": 587,
         "secure": false,
-        "auth": {
-          "user": "you@gmail.com",
-          "pass": "your-app-password"
-        }
+        "auth": { "user": "you@gmail.com", "pass": "app-password" }
       },
       "to": "you@gmail.com"
     }
@@ -243,41 +214,44 @@ DevBrief supports three notification channels: webhook, Discord, and email. Conf
 }
 ```
 
-You can configure any combination of channels. If a channel fails, DevBrief logs the failure and continues delivering to the remaining channels.
+Use any combination. If one channel fails, the others still deliver.
 
-For email notifications, set the corresponding `SMTP_*` environment variables or provide them inline in the config as shown above.
+---
 
 ## Data Storage
 
-DevBrief stores data locally and optionally in the cloud:
+### Local (always active — no configuration needed)
 
-**Local (SQLite — always active):**
-- **SQLite database:** `~/.devbrief/devbrief.db` — stores change entries and run records
-- **Audio files:** `~/.devbrief/audio/` — stores generated MP3 briefings as `{run_id}.mp3`
-- **Stack config:** `~/.devbrief/stack-config.json` — your monitored libraries
-- **Notification config:** `~/.devbrief/notification-config.json` — notification channel settings
+All data lives in `~/.devbrief/` (created automatically on first run):
 
-**Cloud (HydraDB — optional):**
-- Classified change entries are synced to HydraDB as knowledge items for semantic recall
-- Run summaries are stored for cross-device access and future retrieval
-- Deduplication always runs against the local SQLite store (HydraDB is a sync layer, not the dedup source)
-- Falls back gracefully to SQLite-only if `HYDRADB_API_KEY` is not set
+| Path | Contents |
+|---|---|
+| `devbrief.db` | SQLite database — change entries, run records, dedup index |
+| `audio/` | Generated MP3 briefings (`{run_id}.mp3`) |
+| `stack-config.json` | Your monitored libraries |
+| `notification-config.json` | Notification channel settings |
 
-The `~/.devbrief/` directory (including subdirectories) is created automatically on first use.
+Data older than 30 days is automatically purged at the start of each run.
 
-Run records and change entries older than 30 days are automatically purged at the start of each pipeline run.
+### Cloud Sync via HydraDB (optional)
+
+When `HYDRADB_API_KEY` is set, classified change entries and run summaries are synced to [HydraDB](https://docs.usecortex.ai) for:
+
+- Cross-device access (run from laptop, check from phone)
+- Semantic recall ("what breaking changes did I see this month?")
+
+Important: deduplication always runs against local SQLite. HydraDB is a sync layer, not the dedup source. If the API key isn't set, everything works normally in local-only mode.
+
+---
 
 ## Architecture
 
-DevBrief uses [Mastra](https://mastra.ai) as its workflow orchestration framework. The pipeline is defined using Mastra's `createWorkflow` and `createStep` from `@mastra/core/workflows`, with a unified pipeline state schema flowing through all steps.
-
-[HydraDB](https://docs.usecortex.ai) provides optional persistent cloud storage for classified change entries and run summaries. It acts as a sync layer for cloud access and future semantic recall — deduplication always runs against the local SQLite store. When `HYDRADB_API_KEY` is not set, DevBrief operates in SQLite-only mode (fully functional).
+Built with [Mastra](https://mastra.ai) for workflow orchestration. Each pipeline step is a `createStep()` that chains via `.then()`. A unified `pipelineStatus` field flows through all steps — if any step fails, downstream steps skip cleanly.
 
 ### System Overview
 
 ```mermaid
 flowchart TD
-    %% --- Trigger Layer ---
     subgraph TRIGGERS["Trigger Layer"]
         direction LR
         CRON["Cron Schedule\n(Daily 7 AM)"]:::trigger
@@ -285,7 +259,6 @@ flowchart TD
         CLI["CLI\nnpx devbrief run"]:::trigger
     end
 
-    %% --- Core Pipeline ---
     subgraph PIPELINE["Core Pipeline — Mastra Workflow Engine"]
         direction TD
         P1["Scrape Changelogs"]:::core
@@ -297,7 +270,6 @@ flowchart TD
         P1 --> P2 --> P3 --> P4 --> P5 --> P6
     end
 
-    %% --- External Services ---
     subgraph SERVICES["External Services"]
         direction LR
         OLO["Olostep\nWeb Scraping"]:::external
@@ -305,14 +277,12 @@ flowchart TD
         SAR["Sarvam AI\nText-to-Speech"]:::external
     end
 
-    %% --- Storage ---
     subgraph STORE["Storage Layer"]
         direction LR
         SQL[("SQLite\nLocal")]:::storage
         HDB[("HydraDB\nCloud (optional)")]:::storage
     end
 
-    %% --- Delivery ---
     subgraph DELIVER["Notification Channels"]
         direction LR
         WH["Webhook"]:::delivery
@@ -320,7 +290,6 @@ flowchart TD
         EM["Email"]:::delivery
     end
 
-    %% --- Connections ---
     TRIGGERS --> PIPELINE
     P1 -.-> OLO
     P3 -.-> LLM
@@ -329,7 +298,6 @@ flowchart TD
     P3 -.-> HDB
     P6 --> DELIVER
 
-    %% --- Styles ---
     classDef trigger fill:#1a1a2e,color:#ffffff,stroke:#16213e
     classDef core fill:#0f3460,color:#ffffff,stroke:#1a1a2e
     classDef external fill:#e94560,color:#ffffff,stroke:#1a1a2e
@@ -337,7 +305,7 @@ flowchart TD
     classDef delivery fill:#0f3460,color:#ffffff,stroke:#1a1a2e
 ```
 
-### Pipeline Flow (with error handling)
+### Error Handling
 
 ```mermaid
 flowchart TD
@@ -415,21 +383,18 @@ flowchart TD
     classDef infra fill:#16213e,color:#ffffff,stroke:#0f3460
 ```
 
+---
+
 ## Development
 
 ```bash
-# Run tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Build
-npm run build
-
-# Start in dev mode (with tsx)
-npm run dev
+npm test          # Run tests (vitest)
+npm run test:watch  # Watch mode
+npm run build     # Compile TypeScript
+npm run dev       # Dev server with tsx (auto-reload)
 ```
+
+---
 
 ## License
 
