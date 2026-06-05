@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createApp, detectTailscaleIP } from './index.js';
+import { createApp } from './index.js';
+import { detectTailscaleIP } from '../utils/network.js';
 import type { RunRecord } from '../models/index.js';
 
 // ---------------------------------------------------------------------------
@@ -139,7 +140,7 @@ describe('POST /trigger', () => {
     const res = await app.request('/trigger', { method: 'POST' });
 
     expect(res.status).toBe(202);
-    expect(mockedRunDevBriefPipeline).toHaveBeenCalledWith('webhook');
+    expect(mockedRunDevBriefPipeline).toHaveBeenCalledWith('webhook', expect.any(String));
 
     resolvePromise!(makeRunRecord());
   });
@@ -311,7 +312,7 @@ describe('GET /audio/:run_id', () => {
     mockedExistsSync.mockReturnValueOnce(true);
     mockedReadFileSync.mockReturnValueOnce(fakeAudio);
 
-    const res = await app.request('/audio/test-run-id');
+    const res = await app.request('/audio/550e8400-e29b-41d4-a716-446655440000');
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
@@ -326,7 +327,7 @@ describe('GET /audio/:run_id', () => {
     mockedExistsSync.mockReturnValueOnce(true);
     mockedReadFileSync.mockReturnValueOnce(fakeAudio);
 
-    const res = await app.request('/audio/test-run-id.mp3');
+    const res = await app.request('/audio/550e8400-e29b-41d4-a716-446655440000.mp3');
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
@@ -335,7 +336,7 @@ describe('GET /audio/:run_id', () => {
   it('returns 404 when audio file does not exist', async () => {
     mockedExistsSync.mockReturnValueOnce(false);
 
-    const res = await app.request('/audio/nonexistent-run-id');
+    const res = await app.request('/audio/550e8400-e29b-41d4-a716-446655440001');
 
     expect(res.status).toBe(404);
     const body: AnyJSON = await res.json();

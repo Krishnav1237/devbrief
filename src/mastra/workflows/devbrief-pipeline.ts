@@ -170,34 +170,37 @@ export const deduplicateStep = createStep({
 
     // Query HydraDB for additional dedup data
     const hydraClient = getHydraDBClient();
+    const entriesToDeduplicate = [];
+    let hydraDuplicateCount = 0;
+
     if (hydraClient) {
-      const libraryNames = [...new Set(state.entries.map((e) => e.library_name))];
-      for (const libName of libraryNames) {
-        for (const entry of state.entries) {
-          if (entry.library_name === libName && entry.version !== 'unknown') {
-            const exists = await hydraClient.entryExists(libName, entry.version);
-            if (exists) {
-              // Mark as already seen — the local dedup will also catch it,
-              // but this provides cloud-level dedup for multi-device scenarios
-              console.log(
-                `[deduplicate] HydraDB: entry ${libName}@${entry.version} already exists`,
-              );
-            }
+      for (const entry of state.entries) {
+        if (entry.version !== 'unknown') {
+          const exists = await hydraClient.entryExists(entry.library_name, entry.version);
+          if (exists) {
+            console.log(
+              `[deduplicate] HydraDB: entry ${entry.library_name}@${entry.version} already exists`,
+            );
+            hydraDuplicateCount++;
+            continue;
           }
         }
+        entriesToDeduplicate.push(entry);
       }
+    } else {
+      entriesToDeduplicate.push(...state.entries);
     }
 
     const deduplicateOutput = await deduplicateLogic.execute({
       inputData: {
-        entries: state.entries,
+        entries: entriesToDeduplicate,
         errors: state.errors,
         runId: state.runId,
       },
     });
 
     state.newEntries = deduplicateOutput.newEntries;
-    state.duplicateCount = deduplicateOutput.duplicateCount;
+    state.duplicateCount = deduplicateOutput.duplicateCount + hydraDuplicateCount;
     state.errors = deduplicateOutput.errors;
     state.pipelineStatus = deduplicateOutput.pipelineStatus;
     state.newChangeCount = deduplicateOutput.newEntries.length;
@@ -472,9 +475,9 @@ export const devbriefPipeline = createWorkflow({
 // Helper: create initial pipeline state
 // ---------------------------------------------------------------------------
 
-export function createInitialPipelineState(triggerType: TriggerType): PipelineState {
+export function createInitialPipelineState(triggerType: TriggerType, runId?: string): PipelineState {
   return {
-    runId: uuidv4(),
+    runId: runId ?? uuidv4(),
     triggerType,
     triggeredAt: new Date().toISOString(),
     librariesProcessed: [],

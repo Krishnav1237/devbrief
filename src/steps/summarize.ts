@@ -200,8 +200,9 @@ function delay(ms: number): Promise<void> {
  */
 async function callGroq(prompt: string, apiKey: string): Promise<string> {
   const client = new Groq({ apiKey });
+  const model = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
   const response = await client.chat.completions.create({
-    model: 'openai/gpt-oss-120b',
+    model,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.2,
     max_tokens: 512,

@@ -37,17 +37,44 @@ export async function classifyRisk(
   const recommendations: string[] = [];
   let vulnerabilitiesFound: Vulnerability[] = [];
 
-  // Check for security issues/CVEs (CRITICAL)
-  if (changelogAnalysis.hasSecurityFixes) {
-    riskLevel = 'CRITICAL';
-    severityScore = 80 + Math.round(changelogAnalysis.confidenceScores.security * 20);
-    reasoningParts.push(
-      `Security fixes detected with ${Math.round(changelogAnalysis.confidenceScores.security * 100)}% confidence.`
+  // Detect if there are vulnerabilities for this library in the project
+  try {
+    const projectVulnerabilities = await detectVulnerabilities();
+    vulnerabilitiesFound = projectVulnerabilities.filter(
+      v => v.packageName.toLowerCase() === libraryName.toLowerCase()
     );
+  } catch (err) {
+    console.warn(
+      `[risk-classifier] Vulnerability lookup failed for ${libraryName}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
+  // Check for security issues/CVEs (CRITICAL)
+  if (changelogAnalysis.hasSecurityFixes || vulnerabilitiesFound.length > 0) {
+    riskLevel = 'CRITICAL';
+    let securityConfidence = changelogAnalysis.confidenceScores.security;
+    if (vulnerabilitiesFound.length > 0) {
+      const maxVulnSeverity = vulnerabilitiesFound.reduce((max, v) => {
+        const map = { CRITICAL: 4, HIGH: 3, MODERATE: 2, LOW: 1 };
+        return map[v.severity] > map[max] ? v.severity : max;
+      }, 'LOW' as Vulnerability['severity']);
+      
+      const vulnScoreMap = { CRITICAL: 100, HIGH: 95, MODERATE: 85, LOW: 80 };
+      severityScore = vulnScoreMap[maxVulnSeverity];
+      reasoningParts.push(
+        `Active security vulnerabilities detected in project: ${vulnerabilitiesFound.map(v => `${v.cveId || 'N/A'} (${v.severity})`).join(', ')}.`
+      );
+    } else {
+      severityScore = 80 + Math.round(securityConfidence * 20);
+      reasoningParts.push(
+        `Security fixes detected in changelog with ${Math.round(securityConfidence * 100)}% confidence.`
+      );
+    }
     if (changelogAnalysis.securityDescriptions.length > 0) {
       reasoningParts.push(`Details: ${changelogAnalysis.securityDescriptions.join('; ')}`);
     }
-    recommendations.push('Update immediately');
+    recommendations.push(vulnerabilitiesFound.length > 0 ? 'Update immediately - active project vulnerability' : 'Update immediately');
   }
   // Check for breaking changes (BREAKING)
   else if (changelogAnalysis.hasBreakingChanges) {
@@ -89,7 +116,9 @@ export async function classifyRisk(
       `This library is in the project's ${userDep!.isDev ? 'devDependencies' : 'dependencies'}.`
     );
     if (riskLevel === 'CRITICAL') {
-      recommendations[0] = 'Update immediately - critical security issue';
+      recommendations[0] = vulnerabilitiesFound.length > 0
+        ? 'Update immediately - active project vulnerability'
+        : 'Update immediately - critical security issue';
     } else if (riskLevel === 'BREAKING' && !userDep!.isDev) {
       recommendations[0] = recommendations[0].replace('in next sprint', 'ASAP');
     }

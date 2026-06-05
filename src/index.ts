@@ -14,7 +14,7 @@ dotenv.config();
 
 import { validateEnvVars } from './cli/env-validation.js';
 import { ensureDevbriefDir } from './utils/config-io.js';
-import { initStore } from './utils/store.js';
+import { initStore, closeStore } from './utils/store.js';
 import { startServer } from './server/index.js';
 import { startScheduler, stopScheduler } from './scheduler/index.js';
 
@@ -54,6 +54,12 @@ async function main(): Promise<void> {
     stopScheduler();
     server.close(() => {
       console.log('[devbrief] HTTP server closed.');
+      try {
+        closeStore();
+        console.log('[devbrief] SQLite store connection closed.');
+      } catch (err) {
+        console.error('[devbrief] Failed to close SQLite store connection:', err);
+      }
       process.exit(0);
     });
 

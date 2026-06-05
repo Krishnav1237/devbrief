@@ -71,7 +71,7 @@ export function setRunInProgress(value: boolean): void {
  * @param triggerType - How the pipeline was triggered ('manual', 'cron', or 'webhook')
  * @returns The finalized RunRecord
  */
-export async function runDevBriefPipeline(triggerType: TriggerType): Promise<RunRecord> {
+export async function runDevBriefPipeline(triggerType: TriggerType, runId?: string): Promise<RunRecord> {
   // Prevent concurrent runs
   if (runInProgress) {
     throw new Error('A pipeline run is already in progress.');
@@ -79,8 +79,8 @@ export async function runDevBriefPipeline(triggerType: TriggerType): Promise<Run
 
   runInProgress = true;
 
-  const initialState = createInitialPipelineState(triggerType);
-  const runId = initialState.runId;
+  const initialState = createInitialPipelineState(triggerType, runId);
+  const actualRunId = initialState.runId;
 
   try {
     // Execute the Mastra workflow
@@ -114,12 +114,12 @@ export async function runDevBriefPipeline(triggerType: TriggerType): Promise<Run
     // Fallback: if workflow execution didn't produce a clean result,
     // run the pipeline directly (sequential execution)
     console.warn('[pipeline] Mastra workflow did not produce expected result, using direct execution');
-    return await runDirectPipeline(triggerType, runId, initialState.triggeredAt);
+    return await runDirectPipeline(triggerType, actualRunId, initialState.triggeredAt);
   } catch (err) {
     // If Mastra workflow fails (e.g., missing pubsub/storage), fall back to direct execution
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[pipeline] Mastra workflow error: ${message}. Falling back to direct execution.`);
-    return await runDirectPipeline(triggerType, runId, initialState.triggeredAt);
+    return await runDirectPipeline(triggerType, actualRunId, initialState.triggeredAt);
   } finally {
     runInProgress = false;
   }
@@ -213,30 +213,36 @@ async function runDirectPipeline(
 
     // --- deduplicateStep (with HydraDB query) ---
     const hydraClient = getHydraDBClient();
-    if (hydraClient) {
-      const libraryNames = [...new Set(scrapeOutput.entries.map((e) => e.library_name))];
-      for (const libName of libraryNames) {
-        for (const entry of scrapeOutput.entries) {
-          if (entry.library_name === libName && entry.version !== 'unknown') {
-            const exists = await hydraClient.entryExists(libName, entry.version);
-            if (exists) {
-              console.log(
-                `[deduplicate] HydraDB: entry ${libName}@${entry.version} already exists`,
-              );
-            }
+    const entriesToDeduplicate = [];
+    let hydraDuplicateCount = 0;
+
+    if (hydraClient && pipelineStatus !== 'skip_to_finalize') {
+      for (const entry of scrapeOutput.entries) {
+        if (entry.version !== 'unknown') {
+          const exists = await hydraClient.entryExists(entry.library_name, entry.version);
+          if (exists) {
+            console.log(
+              `[deduplicate] HydraDB: entry ${entry.library_name}@${entry.version} already exists`,
+            );
+            hydraDuplicateCount++;
+            continue;
           }
         }
+        entriesToDeduplicate.push(entry);
       }
+    } else {
+      entriesToDeduplicate.push(...scrapeOutput.entries);
     }
 
     const deduplicateOutput = await deduplicateStep.execute({
       inputData: {
-        entries: scrapeOutput.entries,
+        entries: entriesToDeduplicate,
         errors,
         runId,
         pipelineStatus,
       },
     });
+    deduplicateOutput.duplicateCount += hydraDuplicateCount;
     errors = deduplicateOutput.errors;
     pipelineStatus = deduplicateOutput.pipelineStatus;
     runRecord.new_change_count = deduplicateOutput.newEntries.length;

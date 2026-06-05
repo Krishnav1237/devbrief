@@ -31,7 +31,7 @@ export function initStore(dbPath?: string): Database.Database {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(resolvedPath);
+  db = new Database(resolvedPath, { timeout: 5000 });
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 

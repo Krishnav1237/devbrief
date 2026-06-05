@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { classifyRisk } from './risk-classifier';
 import { ParsedDependency } from './package-parser';
+
+vi.mock('./vulnerability-detector', () => ({
+  detectVulnerabilities: vi.fn(async () => []),
+}));
 
 describe('risk-classifier', () => {
   describe('classifyRisk', () => {

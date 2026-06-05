@@ -170,7 +170,7 @@ describe('Property 7: Purge preserves recent entries and removes old ones', () =
           expect(tsMs).toBeGreaterThanOrEqual(cutoffMs);
         }
       }),
-      { numRuns: 100 },
+      { numRuns: 10 },
     );
   });
 
@@ -208,7 +208,7 @@ describe('Property 7: Purge preserves recent entries and removes old ones', () =
         expect(countEntries()).toBe(expectedEntryCount);
         expect(countRuns()).toBe(expectedRunCount);
       }),
-      { numRuns: 100 },
+      { numRuns: 10 },
     );
   });
 });

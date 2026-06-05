@@ -7,6 +7,7 @@ import {
   ClassifiedChangeEntrySchema,
   type ClassifiedChangeEntry,
 } from './summarize.js';
+import { detectTailscaleIP } from '../utils/network.js';
 
 // ---------------------------------------------------------------------------
 // Zod schemas for step I/O
@@ -117,7 +118,7 @@ export const publishStep = {
     }
 
     // Build the local digest URL (primary path — Paperclip not validated)
-    const tailscaleIp = process.env.TAILSCALE_IP;
+    const tailscaleIp = process.env.TAILSCALE_IP || detectTailscaleIP() || undefined;
     const port = process.env.DEVBRIEF_PORT;
     const digestLink = buildDigestUrl(runId, tailscaleIp, port);
 

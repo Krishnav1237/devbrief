@@ -1,7 +1,15 @@
 {
   "name": "devbrief",
   "version": "0.1.0",
-  "description": "AI agent that monitors your library stack, scrapes changelogs daily, and delivers a concise voice briefing on what changed.",
+  "description": "Open-source local-first project maintenance intelligence tool that tells developers what actually needs attention and what they can safely ignore.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Krishnav1237/devbrief.git"
+  },
+  "homepage": "https://github.com/Krishnav1237/devbrief#readme",
+  "bugs": {
+    "url": "https://github.com/Krishnav1237/devbrief/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -9,12 +17,34 @@
     "devbrief-server": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "cli": "tsx src/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "keywords": [
+    "maintenance",
+    "dependency-management",
+    "security",
+    "runtime",
+    "eol",
+    "nodejs",
+    "developer-tools",
+    "cli"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "docs",
+    "examples"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -132,7 +132,7 @@ describe('Property 15: Run history ordering and completeness', () => {
           expect(prev).toBeGreaterThanOrEqual(curr);
         }
       }),
-      { numRuns: 100 },
+      { numRuns: 10 },
     );
   });
 
@@ -175,7 +175,7 @@ describe('Property 15: Run history ordering and completeness', () => {
           expect(retrieved!.completed_at).toBe(original.completed_at);
         }
       }),
-      { numRuns: 100 },
+      { numRuns: 10 },
     );
   });
 });

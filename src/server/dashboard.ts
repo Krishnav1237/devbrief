@@ -1,205 +1,5 @@
-/**
- * DevBrief Dashboard routes.
- *
- * Provides HTML dashboard UI and JSON API for viewing risk reports,
- * library updates, and change summaries.
- */
-
 import { Hono } from 'hono';
-import { getStore } from '../utils/store.js';
-import type { ChangeEntry } from '../models/index.js';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface DashboardSummary {
-  criticalCount: number;
-  breakingCount: number;
-  minorCount: number;
-  totalCount: number;
-  summary: string;
-}
-
-interface DashboardLibrary {
-  name: string;
-  version: string;
-  riskLevel: 'CRITICAL' | 'BREAKING' | 'MINOR' | 'NONE';
-  changeCount: number;
-}
-
-interface DashboardChange {
-  libraryName: string;
-  version: string;
-  classification: string | null;
-  summary: string | null;
-  sourceUrl: string;
-  scrapedAt: string;
-}
-
-interface DashboardResponse {
-  summary: DashboardSummary;
-  libraries: DashboardLibrary[];
-  changes: DashboardChange[];
-  lastRun: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// Risk classification helpers
-// ---------------------------------------------------------------------------
-
-function classifyRiskLevel(
-  classification: string | null,
-): 'CRITICAL' | 'BREAKING' | 'MINOR' {
-  if (!classification) return 'MINOR';
-
-  const normalized = (classification || '').toLowerCase();
-  if (normalized === 'breaking') return 'BREAKING';
-  if (normalized === 'deprecation') return 'BREAKING';
-  return 'MINOR';
-}
-
-// ---------------------------------------------------------------------------
-// Dashboard data retrieval
-// ---------------------------------------------------------------------------
-
-function getDashboardData(): DashboardResponse {
-  const store = getStore();
-
-  // Get latest run
-  const latestRun = store
-    .prepare(
-      'SELECT * FROM run_records ORDER BY triggered_at DESC LIMIT 1',
-    )
-    .get() as Record<string, unknown> | undefined;
-
-  const lastRunTimestamp = latestRun ? (latestRun.completed_at as string) : null;
-
-  // Get all recent change entries (last 50)
-  const changes = store
-    .prepare(
-      `SELECT * FROM change_entries 
-       ORDER BY scraped_at DESC 
-       LIMIT 50`,
-    )
-    .all() as Array<Record<string, unknown>>;
-
-  const changesList: DashboardChange[] = changes.map((row) => ({
-    libraryName: row.library_name as string,
-    version: row.version as string,
-    classification: (row.classification as string) || null,
-    summary: (row.summary as string) || null,
-    sourceUrl: row.source_url as string,
-    scrapedAt: row.scraped_at as string,
-  }));
-
-  // Group by library and count by risk level
-  const libraryMap = new Map<string, { entries: DashboardChange[]; versions: Set<string> }>();
-
-  for (const change of changesList) {
-    if (!libraryMap.has(change.libraryName)) {
-      libraryMap.set(change.libraryName, {
-        entries: [],
-        versions: new Set(),
-      });
-    }
-    const lib = libraryMap.get(change.libraryName)!;
-    lib.entries.push(change);
-    lib.versions.add(change.version);
-  }
-
-  // Count risk levels across all changes
-  let criticalCount = 0;
-  let breakingCount = 0;
-  let minorCount = 0;
-
-  for (const change of changesList) {
-    const risk = classifyRiskLevel(change.classification);
-    if (risk === 'BREAKING') {
-      breakingCount++;
-    } else if (risk === 'MINOR') {
-      minorCount++;
-    }
-  }
-
-  // Build library list
-  const libraries: DashboardLibrary[] = Array.from(libraryMap.entries()).map(
-    ([name, data]) => {
-      let maxRisk: 'CRITICAL' | 'BREAKING' | 'MINOR' | 'NONE' = 'NONE';
-
-      for (const entry of data.entries) {
-        const risk = classifyRiskLevel(entry.classification);
-        if (risk === 'BREAKING') maxRisk = 'BREAKING';
-        if (maxRisk !== 'BREAKING' && risk === 'MINOR') {
-          maxRisk = 'MINOR';
-        }
-      }
-
-      const latestVersion = Array.from(data.versions).sort().reverse()[0];
-
-      return {
-        name,
-        version: latestVersion,
-        riskLevel: maxRisk,
-        changeCount: data.entries.length,
-      };
-    },
-  );
-
-  libraries.sort((a, b) => {
-    const riskOrder: Record<string, number> = {
-      BREAKING: 0,
-      CRITICAL: 1,
-      MINOR: 2,
-      NONE: 3,
-    };
-    return riskOrder[a.riskLevel] - riskOrder[b.riskLevel];
-  });
-
-  const totalCount = changesList.length;
-  const summary =
-    totalCount === 0
-      ? 'All systems up to date'
-      : `${breakingCount} BREAKING, ${minorCount} MINOR updates available`;
-
-  return {
-    summary: {
-      criticalCount,
-      breakingCount,
-      minorCount,
-      totalCount,
-      summary,
-    },
-    libraries: libraries.slice(0, 20),
-    changes: changesList,
-    lastRun: lastRunTimestamp,
-  };
-}
-
-function getDashboardDataForLibrary(libraryName: string): DashboardChange[] {
-  const store = getStore();
-
-  const rows = store
-    .prepare(
-      `SELECT * FROM change_entries 
-       WHERE library_name = ? 
-       ORDER BY scraped_at DESC`,
-    )
-    .all(libraryName) as Array<Record<string, unknown>>;
-
-  return rows.map((row) => ({
-    libraryName: row.library_name as string,
-    version: row.version as string,
-    classification: (row.classification as string) || null,
-    summary: (row.summary as string) || null,
-    sourceUrl: row.source_url as string,
-    scrapedAt: row.scraped_at as string,
-  }));
-}
-
-// ---------------------------------------------------------------------------
-// HTML generation
-// ---------------------------------------------------------------------------
+import { runMaintenanceScan } from '../maintenance/engine.js';
 
 function generateDashboardHTML(): string {
   return `<!DOCTYPE html>
@@ -207,378 +7,334 @@ function generateDashboardHTML(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevBrief Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <title>DevBrief Maintenance Radar</title>
   <style>
     :root {
-      --color-critical: #ef4444;
-      --color-breaking: #f97316;
-      --color-minor: #3b82f6;
-      --color-dark: #1f2937;
-      --color-darker: #111827;
+      color-scheme: light;
+      --bg: #f7f8f5;
+      --panel: #ffffff;
+      --ink: #19201d;
+      --muted: #66736c;
+      --line: #dce2dd;
+      --accent: #0f766e;
+      --risk: #b42318;
+      --warn: #a15c07;
+      --safe: #137333;
     }
+
+    * { box-sizing: border-box; }
 
     body {
-      background-color: var(--color-darker);
-      color: #e5e7eb;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
     }
 
-    .badge-critical {
-      background-color: var(--color-critical);
-      color: white;
-      padding: 0.25rem 0.75rem;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      font-weight: 500;
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
     }
 
-    .badge-breaking {
-      background-color: var(--color-breaking);
-      color: white;
-      padding: 0.25rem 0.75rem;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-
-    .badge-minor {
-      background-color: var(--color-minor);
-      color: white;
-      padding: 0.25rem 0.75rem;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-
-    .badge-none {
-      background-color: #6b7280;
-      color: white;
-      padding: 0.25rem 0.75rem;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-
-    .card {
-      background-color: var(--color-dark);
-      border: 1px solid #374151;
-      border-radius: 0.5rem;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #374151;
-      padding-bottom: 1rem;
-      margin-bottom: 1rem;
-    }
-
-    .library-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem;
-      border-bottom: 1px solid #374151;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-
-    .library-row:hover {
-      background-color: #1f2937;
-    }
-
-    .library-row:last-child {
-      border-bottom: none;
-    }
-
-    .library-info {
-      flex: 1;
-    }
-
-    .library-name {
-      font-weight: 500;
-      font-size: 1rem;
-      margin-bottom: 0.25rem;
-    }
-
-    .library-version {
-      color: #9ca3af;
-      font-size: 0.875rem;
-    }
-
-    .library-actions {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-    }
-
-    .stat-group {
+    header {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      padding: 20px 0 26px;
+      border-bottom: 1px solid var(--line);
     }
 
-    .stat-box {
-      background-color: #111827;
-      border: 1px solid #374151;
-      border-radius: 0.5rem;
-      padding: 1rem;
-      text-align: center;
+    h1 {
+      margin: 0 0 8px;
+      font-size: 34px;
+      line-height: 1.05;
+      font-weight: 760;
     }
 
-    .stat-number {
-      font-size: 1.875rem;
-      font-weight: bold;
-      margin-bottom: 0.5rem;
+    p { margin: 0; }
+
+    .muted { color: var(--muted); }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 28px;
+      margin-top: 28px;
     }
 
-    .stat-label {
-      color: #9ca3af;
-      font-size: 0.875rem;
+    .score {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-variant-numeric: tabular-nums;
     }
 
-    .changes-list {
-      max-height: 400px;
-      overflow-y: auto;
+    .score strong {
+      font-size: 48px;
+      line-height: 1;
     }
 
-    .change-item {
-      padding: 1rem;
-      border-bottom: 1px solid #374151;
-      font-size: 0.875rem;
+    .summary {
+      margin-top: 18px;
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      font-size: 18px;
+      font-weight: 650;
     }
 
-    .change-item:last-child {
-      border-bottom: none;
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 24px 0 16px;
     }
 
-    .change-library {
-      font-weight: 500;
-      margin-bottom: 0.25rem;
+    button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      cursor: pointer;
     }
 
-    .change-summary {
-      color: #9ca3af;
-      margin-bottom: 0.5rem;
+    button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #e6f3f1;
     }
 
-    .change-time {
-      color: #6b7280;
-      font-size: 0.75rem;
+    .list {
+      border-top: 1px solid var(--line);
     }
 
-    .loading {
-      text-align: center;
-      padding: 2rem;
-      color: #9ca3af;
+    .finding {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr) 120px;
+      gap: 16px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--line);
+      transition: background-color 120ms ease;
     }
 
-    .error {
-      background-color: var(--color-critical);
-      padding: 1rem;
-      border-radius: 0.5rem;
-      margin-bottom: 1rem;
+    .finding:hover {
+      background: rgba(15, 118, 110, 0.05);
+    }
+
+    .label {
+      width: fit-content;
+      border-radius: 6px;
+      padding: 4px 7px;
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.2;
+      border: 1px solid currentColor;
+    }
+
+    .SAFE { color: var(--safe); }
+    .REVIEW, .UPGRADE { color: var(--warn); }
+    .RISKY, .EOL, .ACTION { color: var(--risk); }
+
+    .finding h2 {
+      margin: 0 0 5px;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .evidence {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    aside {
+      border-left: 1px solid var(--line);
+      padding-left: 24px;
+    }
+
+    .aside-section {
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .aside-section:first-child { padding-top: 0; }
+
+    .aside-title {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-weight: 760;
+    }
+
+    .action {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      font-size: 14px;
+      border-top: 1px solid #edf0ed;
+    }
+
+    .empty {
+      padding: 28px 0;
+      color: var(--muted);
+    }
+
+    @media (max-width: 820px) {
+      header, .shell, .finding {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        border-left: 0;
+        padding-left: 0;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="min-h-screen bg-gray-900">
-    <!-- Header -->
-    <div class="bg-gray-800 border-b border-gray-700 py-6 px-4 md:px-8">
-      <div class="max-w-6xl mx-auto">
-        <h1 class="text-3xl font-bold mb-2">DevBrief Dashboard</h1>
-        <p class="text-gray-400">Library updates and risk monitoring</p>
+  <main>
+    <header>
+      <div>
+        <h1>DevBrief</h1>
+        <p class="muted">Project maintenance radar for the current codebase.</p>
       </div>
-    </div>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
 
-    <!-- Main Content -->
-    <div class="max-w-6xl mx-auto py-8 px-4 md:px-8">
-      <div id="error-container"></div>
-      <div id="loading" class="loading">Loading dashboard...</div>
-
-      <div id="content" style="display: none;">
-        <!-- Summary Stats -->
-        <div class="stat-group" id="stats-container"></div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <!-- Libraries -->
-          <div class="card">
-            <div class="card-header">
-              <h2 class="text-xl font-bold">Libraries</h2>
-              <span id="library-count" class="text-gray-400"></span>
-            </div>
-            <div id="libraries-container"></div>
-          </div>
-
-          <!-- Recent Changes -->
-          <div class="card">
-            <div class="card-header">
-              <h2 class="text-xl font-bold">Recent Changes</h2>
-              <span id="last-run" class="text-gray-400 text-sm"></span>
-            </div>
-            <div class="changes-list" id="changes-container"></div>
-          </div>
+    <div id="loading" class="empty">Scanning project maintenance risk...</div>
+    <section id="content" class="shell" hidden>
+      <div>
+        <div class="score"><strong id="score">--</strong><span class="muted">/100 health</span></div>
+        <div id="summary" class="summary"></div>
+        <div id="filters" class="toolbar"></div>
+        <div id="findings" class="list"></div>
+      </div>
+      <aside>
+        <div class="aside-section">
+          <p class="aside-title">Latest Scan</p>
+          <p id="scannedAt" class="muted"></p>
         </div>
-      </div>
-    </div>
-  </div>
+        <div class="aside-section">
+          <p class="aside-title">Recommended Actions</p>
+          <div id="actions"></div>
+        </div>
+        <div class="aside-section">
+          <p class="aside-title">Ignored By Default</p>
+          <p id="ignored" class="muted"></p>
+        </div>
+      </aside>
+    </section>
+  </main>
 
   <script>
-    async function loadDashboard() {
-      try {
-        const response = await fetch('/api/dashboard/summary');
-        if (!response.ok) {
-          throw new Error(\`HTTP \${response.status}\`);
-        }
-        const data = await response.json();
-        renderDashboard(data);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        document.getElementById('error-container').innerHTML = 
-          \`<div class="error">Failed to load dashboard: \${errorMsg}</div>\`;
-        document.getElementById('loading').style.display = 'none';
-      }
-    }
+    let state = null;
+    let activeCategory = 'all';
 
-    function renderDashboard(data) {
-      // Render stats
-      const statsContainer = document.getElementById('stats-container');
-      statsContainer.innerHTML = \`
-        <div class="stat-box">
-          <div class="stat-number" style="color: var(--color-breaking);">\${data.summary.breakingCount}</div>
-          <div class="stat-label">BREAKING Changes</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-number" style="color: var(--color-minor);">\${data.summary.minorCount}</div>
-          <div class="stat-label">MINOR Changes</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-number">\${data.summary.totalCount}</div>
-          <div class="stat-label">Total Updates</div>
-        </div>
-      \`;
+    const labelClass = (label) => label.replace(/ .*/, '');
 
-      // Render libraries
-      const librariesContainer = document.getElementById('libraries-container');
-      if (data.libraries.length === 0) {
-        librariesContainer.innerHTML = '<div class="text-gray-400 text-center py-4">No libraries found</div>';
-      } else {
-        librariesContainer.innerHTML = data.libraries.map(lib => {
-          const badgeClass = \`badge-\${lib.riskLevel.toLowerCase()}\`;
-          return \`
-            <div class="library-row" onclick="viewLibraryDetails('\${lib.name}')">
-              <div class="library-info">
-                <div class="library-name">\${escapeHtml(lib.name)}</div>
-                <div class="library-version">v\${escapeHtml(lib.version)} · \${lib.changeCount} change\${lib.changeCount !== 1 ? 's' : ''}</div>
-              </div>
-              <div class="library-actions">
-                <span class="\${badgeClass}">\${lib.riskLevel}</span>
-              </div>
-            </div>
-          \`;
-        }).join('');
-      }
-      document.getElementById('library-count').textContent = \`\${data.libraries.length} libraries\`;
-
-      // Render recent changes
-      const changesContainer = document.getElementById('changes-container');
-      if (data.changes.length === 0) {
-        changesContainer.innerHTML = '<div class="text-gray-400 text-center py-4">No recent changes</div>';
-      } else {
-        changesContainer.innerHTML = data.changes.slice(0, 10).map(change => {
-          const riskLevel = change.classification ? (change.classification === 'breaking' || change.classification === 'deprecation' ? 'breaking' : 'minor') : 'minor';
-          const badgeClass = \`badge-\${riskLevel}\`;
-          return \`
-            <div class="change-item">
-              <div class="change-library">\${escapeHtml(change.libraryName)} v\${escapeHtml(change.version)}</div>
-              \${change.summary ? \`<div class="change-summary">\${escapeHtml(change.summary)}</div>\` : ''}
-              <div class="flex justify-between items-center">
-                <span class="\${badgeClass}">\${riskLevel.toUpperCase()}</span>
-                <span class="change-time">\${formatDate(change.scrapedAt)}</span>
-              </div>
-            </div>
-          \`;
-        }).join('');
-      }
-
-      // Format last run
-      if (data.lastRun) {
-        document.getElementById('last-run').textContent = 'Updated: ' + formatDate(data.lastRun);
-      }
-
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('content').style.display = 'block';
-    }
-
-    function viewLibraryDetails(libraryName) {
-      alert('Library details for ' + libraryName + ' would open in a modal or new page.');
-    }
-
-    function escapeHtml(text) {
-      const map = {
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
         '"': '&quot;',
         "'": '&#039;'
-      };
-      return text.replace(/[&<>"']/g, m => map[m]);
+      })[char]);
     }
 
-    function formatDate(isoString) {
-      const date = new Date(isoString);
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    function renderFilters() {
+      const categories = ['all', ...new Set(state.findings.map((finding) => finding.category))];
+      document.getElementById('filters').innerHTML = categories.map((category) =>
+        '<button class="' + (category === activeCategory ? 'active' : '') + '" data-category="' + category + '">' +
+          escapeHtml(category) +
+        '</button>'
+      ).join('');
+
+      document.querySelectorAll('[data-category]').forEach((button) => {
+        button.addEventListener('click', () => {
+          activeCategory = button.dataset.category;
+          render();
+        });
+      });
     }
 
-    // Load dashboard on page load
-    loadDashboard();
+    function renderFindings() {
+      const findings = activeCategory === 'all'
+        ? state.findings
+        : state.findings.filter((finding) => finding.category === activeCategory);
+
+      document.getElementById('findings').innerHTML = findings.length === 0
+        ? '<div class="empty">No visible findings in this category.</div>'
+        : findings.map((finding) =>
+          '<article class="finding">' +
+            '<div><span class="label ' + labelClass(finding.label) + '">' + escapeHtml(finding.label) + '</span></div>' +
+            '<div>' +
+              '<h2>' + escapeHtml(finding.summary) + '</h2>' +
+              '<p class="muted">' + escapeHtml(finding.title) + '</p>' +
+              (finding.evidence ? '<p class="evidence">' + escapeHtml(finding.evidence) + '</p>' : '') +
+            '</div>' +
+            '<div class="muted">' + escapeHtml(finding.effort) + '</div>' +
+          '</article>'
+        ).join('');
+    }
+
+    function renderActions() {
+      const actions = state.findings.slice(0, 5);
+      document.getElementById('actions').innerHTML = actions.length === 0
+        ? '<p class="muted">No action needed.</p>'
+        : actions.map((finding) =>
+          '<div class="action"><span>' + escapeHtml(finding.recommendation) + '</span><span>' + escapeHtml(finding.category) + '</span></div>'
+        ).join('');
+    }
+
+    function render() {
+      document.getElementById('score').textContent = state.healthScore;
+      document.getElementById('summary').textContent = state.summary;
+      document.getElementById('scannedAt').textContent = new Date(state.stats.scannedAt).toLocaleString();
+      document.getElementById('ignored').textContent = state.ignored.length + ' low-signal item' + (state.ignored.length === 1 ? '' : 's') + ' hidden';
+      renderFilters();
+      renderFindings();
+      renderActions();
+    }
+
+    async function loadDashboard() {
+      document.getElementById('loading').hidden = false;
+      document.getElementById('content').hidden = true;
+      const response = await fetch('/api/dashboard/summary');
+      state = await response.json();
+      render();
+      document.getElementById('loading').hidden = true;
+      document.getElementById('content').hidden = false;
+    }
+
+    document.getElementById('refresh').addEventListener('click', loadDashboard);
+    loadDashboard().catch((error) => {
+      document.getElementById('loading').textContent = 'Dashboard scan failed: ' + error.message;
+    });
   </script>
 </body>
 </html>`;
 }
 
-// ---------------------------------------------------------------------------
-// Hono routes
-// ---------------------------------------------------------------------------
-
 export function registerDashboardRoutes(app: Hono): void {
-  // GET /dashboard — serve HTML page
   app.get('/dashboard', (c) => {
-    const html = generateDashboardHTML();
-    return c.html(html);
+    return c.html(generateDashboardHTML());
   });
 
-  // GET /api/dashboard/summary — JSON endpoint
-  app.get('/api/dashboard/summary', (c) => {
+  app.get('/api/dashboard/summary', async (c) => {
     try {
-      const data = getDashboardData();
+      const data = await runMaintenanceScan('doctor', process.cwd());
       return c.json(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      return c.json(
-        { error: 'Failed to load dashboard data', details: message },
-        500,
-      );
-    }
-  });
-
-  // GET /api/dashboard/changes/:library — changes for specific library
-  app.get('/api/dashboard/changes/:library', (c) => {
-    try {
-      const library = c.req.param('library');
-      const changes = getDashboardDataForLibrary(library);
-      return c.json({ library, changes });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return c.json(
-        { error: 'Failed to load changes', details: message },
-        500,
-      );
+      return c.json({ error: 'Failed to load dashboard data', details: message }, 500);
     }
   });
 }

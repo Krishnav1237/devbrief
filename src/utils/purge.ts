@@ -15,16 +15,18 @@ export function purgeOldEntries(now?: Date): { purgedEntries: number; purgedRuns
 
   const store = getStore();
 
-  const entriesResult = store
-    .prepare('DELETE FROM change_entries WHERE scraped_at < ?')
-    .run(cutoffISO);
+  return store.transaction(() => {
+    const entriesResult = store
+      .prepare('DELETE FROM change_entries WHERE scraped_at < ?')
+      .run(cutoffISO);
 
-  const runsResult = store
-    .prepare('DELETE FROM run_records WHERE triggered_at < ?')
-    .run(cutoffISO);
+    const runsResult = store
+      .prepare('DELETE FROM run_records WHERE triggered_at < ?')
+      .run(cutoffISO);
 
-  return {
-    purgedEntries: entriesResult.changes,
-    purgedRuns: runsResult.changes,
-  };
+    return {
+      purgedEntries: entriesResult.changes,
+      purgedRuns: runsResult.changes,
+    };
+  })();
 }

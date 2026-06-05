@@ -18,33 +18,9 @@ import { isRunInProgress, runDevBriefPipeline } from '../workflow.js';
 import { getRunRecords, getRunRecord } from '../utils/store.js';
 import type { DigestResponse } from '../models/index.js';
 import { registerDashboardRoutes } from './dashboard.js';
+import { detectTailscaleIP } from '../utils/network.js';
 
-// ---------------------------------------------------------------------------
-// Tailscale IP detection
-// ---------------------------------------------------------------------------
-
-/**
- * Detects the machine's Tailscale IP by finding the first `100.x.x.x`
- * network interface address. Falls back to the `TAILSCALE_IP` env var
- * if set.
- */
-export function detectTailscaleIP(): string | null {
-  const envIP = process.env.TAILSCALE_IP;
-  if (envIP) return envIP;
-
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    const addrs = interfaces[name];
-    if (!addrs) continue;
-    for (const addr of addrs) {
-      if (addr.family === 'IPv4' && addr.address.startsWith('100.')) {
-        return addr.address;
-      }
-    }
-  }
-
-  return null;
-}
+// Tailscale IP detection imported from network utility
 
 // ---------------------------------------------------------------------------
 // Audio directory
@@ -79,8 +55,8 @@ export function createApp(
 
     const runId = uuidv4();
 
-    // Start the pipeline asynchronously — don't await
-    runDevBriefPipeline('webhook').catch((err) => {
+    // Start the pipeline asynchronously — don't await, passing the generated runId
+    runDevBriefPipeline('webhook', runId).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[server] Pipeline error: ${message}`);
     });
@@ -139,7 +115,20 @@ export function createApp(
     const runId = c.req.param('run_id');
     // Strip .mp3 extension if present in the run_id param
     const cleanRunId = runId.replace(/\.mp3$/, '');
+
+    // Enforce strict UUID format check to block path traversal
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_REGEX.test(cleanRunId)) {
+      return c.json({ error: 'Invalid run ID format' }, 400);
+    }
+
     const audioPath = path.join(AUDIO_DIR, `${cleanRunId}.mp3`);
+    const resolvedPath = path.resolve(audioPath);
+
+    // Secondary defensive check
+    if (!resolvedPath.startsWith(AUDIO_DIR)) {
+      return c.json({ error: 'Access denied' }, 403);
+    }
 
     if (!fs.existsSync(audioPath)) {
       return c.json({ error: 'Audio file not found' }, 404);

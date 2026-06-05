@@ -1,0 +1,244 @@
+import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { runMaintenanceScan } from './engine.js';
+import { formatScanResult } from './output.js';
+import { adviseUpgrade } from './upgrade-advisor.js';
+
+function fixture(): string {
+  return mkdtempSync(join(tmpdir(), 'devbrief-maintenance-'));
+}
+
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, JSON.stringify(value, null, 2));
+}
+
+describe('maintenance intelligence engine', () => {
+  beforeEach(() => {
+    process.env.DEVBRIEF_SKIP_AUDIT = '1';
+    process.env.DEVBRIEF_SKIP_NPM_VIEW = '1';
+  });
+
+  it('formats empty/no-risk projects as safe and calm', async () => {
+    const dir = fixture();
+    writeJson(join(dir, 'package.json'), {
+      name: 'quiet-project',
+      version: '1.0.0',
+      dependencies: {},
+      devDependencies: {},
+    });
+
+    const result = await runMaintenanceScan('doctor', dir);
+    const output = formatScanResult(result);
+
+    expect(result.summary).toBe('SAFE: no current action needed');
+    expect(result.healthScore).toBe(100);
+    expect(output).toContain('SAFE: no urgent, risky, or project-specific maintenance work found');
+  });
+
+  it('detects package risk and project impact for runtime-sensitive dependencies', async () => {
+    const dir = fixture();
+    mkdirSync(join(dir, 'src'));
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        'node-sass': '^7.0.0',
+      },
+    });
+    writeFileSync(join(dir, 'src', 'styles.ts'), "import sass from 'node-sass';\n");
+
+    const result = await runMaintenanceScan('risk', dir);
+
+    expect(result.findings.some((finding) =>
+      finding.label === 'RISKY'
+      && finding.packageName === 'node-sass'
+      && finding.files?.includes('src/styles.ts'),
+    )).toBe(true);
+  });
+
+  it('detects runtime EOL from package engines', async () => {
+    const dir = fixture();
+    writeJson(join(dir, 'package.json'), {
+      engines: {
+        node: '>=18.0.0',
+      },
+    });
+
+    const result = await runMaintenanceScan('runtime', dir);
+
+    expect(result.findings.some((finding) =>
+      finding.label === 'EOL'
+      && finding.summary.includes('Node 18'),
+    )).toBe(true);
+  });
+
+  it('detects infrastructure drift in GitHub Actions', async () => {
+    const dir = fixture();
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+    writeJson(join(dir, 'package.json'), {});
+    writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), [
+      'name: CI',
+      'on: [push]',
+      'jobs:',
+      '  test:',
+      '    runs-on: ubuntu-20.04',
+      '    steps:',
+      '      - uses: actions/checkout@v2',
+    ].join('\n'));
+
+    const result = await runMaintenanceScan('infra', dir);
+
+    expect(result.findings.map((finding) => finding.summary)).toContain('CI uses an old Ubuntu runner image');
+    expect(result.findings.some((finding) => finding.summary.includes('actions/checkout@v2'))).toBe(true);
+  });
+
+  it('detects high-confidence security posture issues', async () => {
+    const dir = fixture();
+    mkdirSync(join(dir, 'src'));
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        express: '^4.18.0',
+      },
+    });
+    writeFileSync(join(dir, 'src', 'server.ts'), [
+      "app.use(cors({ origin: '*' }));",
+      "const key = 'sk-abcdefghijklmnopqrstuvwxyz123456';",
+    ].join('\n'));
+
+    const result = await runMaintenanceScan('security', dir);
+
+    expect(result.findings.some((finding) => finding.label === 'ACTION REQUIRED')).toBe(true);
+    expect(result.findings.some((finding) => finding.summary === 'CORS allows any origin')).toBe(true);
+  });
+
+  it('detects service model retirement references in actual source files', async () => {
+    const dir = fixture();
+    mkdirSync(join(dir, 'src'));
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        openai: '^4.0.0',
+      },
+    });
+    writeFileSync(join(dir, 'src', 'ai.ts'), [
+      "import OpenAI from 'openai';",
+      "const model = 'gpt-4-0314';",
+    ].join('\n'));
+
+    const result = await runMaintenanceScan('services', dir);
+
+    expect(result.findings.some((finding) =>
+      finding.label === 'ACTION REQUIRED'
+      && finding.files?.includes('src/ai.ts'),
+    )).toBe(true);
+  });
+
+  it('advises review for project-used major upgrades', async () => {
+    const dir = fixture();
+    mkdirSync(join(dir, 'src'));
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        express: '^4.18.0',
+      },
+    });
+    writeFileSync(join(dir, 'src', 'server.ts'), "import express from 'express';\n");
+
+    const advice = await adviseUpgrade('express', {
+      projectPath: dir,
+      target: '5.0.0',
+    });
+
+    expect(advice.verdict).toBe('UPGRADE WITH REVIEW');
+    expect(advice.effort).toBe('20 min');
+    expect(advice.findings[0].files).toContain('src/server.ts');
+  });
+
+  it('keeps repeated scans deterministic for incremental local runs', async () => {
+    const dir = fixture();
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        lodash: '^4.17.21',
+      },
+    });
+
+    const first = await runMaintenanceScan('doctor', dir);
+    const second = await runMaintenanceScan('doctor', dir);
+
+    expect(second.summary).toBe(first.summary);
+    expect(second.findings.map((finding) => finding.id)).toEqual(first.findings.map((finding) => finding.id));
+  });
+
+  it('reports first-run scan coverage and package manager detection for pnpm apps', async () => {
+    const dir = fixture();
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        react: '^19.0.0',
+      },
+    });
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
+
+    const result = await runMaintenanceScan('doctor', dir);
+    const output = formatScanResult(result);
+
+    expect(result.stats.ecosystems).toContain('JavaScript/TypeScript');
+    expect(result.stats.packageManagers).toContain('pnpm');
+    expect(output).toContain('Detected: JavaScript/TypeScript');
+    expect(output).toContain('Package manager: pnpm');
+    expect(output).toContain('Scanned:');
+    expect(output).toContain('Next:');
+  });
+
+  it('detects Python projects without requiring Node package metadata', async () => {
+    const dir = fixture();
+    writeFileSync(join(dir, 'requirements.txt'), 'fastapi==0.110.0\nuvicorn>=0.29\n');
+    writeFileSync(join(dir, '.python-version'), '3.10.13\n');
+
+    const result = await runMaintenanceScan('doctor', dir);
+
+    expect(result.stats.ecosystems).toContain('Python');
+    expect(result.stats.packageManagers).toContain('pip-compatible');
+    expect(result.stats.dependencies).toBe(2);
+    expect(result.findings.some((finding) => finding.summary.includes('Python 3.10 reaches EOL on'))).toBe(true);
+  });
+
+  it('detects Rust, Go, and Java project shapes', async () => {
+    const dir = fixture();
+    writeFileSync(join(dir, 'Cargo.toml'), '[package]\nname = "demo"\n[dependencies]\nserde = "1"\n');
+    writeFileSync(join(dir, 'go.mod'), 'module example.com/demo\n\nrequire github.com/google/uuid v1.6.0\n');
+    writeFileSync(join(dir, 'pom.xml'), [
+      '<project>',
+      '<dependencies>',
+      '<dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.0</version></dependency>',
+      '</dependencies>',
+      '</project>',
+    ].join('\n'));
+
+    const result = await runMaintenanceScan('doctor', dir);
+
+    expect(result.stats.ecosystems).toEqual(expect.arrayContaining(['Rust', 'Go', 'Java/JVM']));
+    expect(result.stats.packageManagers).toEqual(expect.arrayContaining(['Cargo', 'Go modules', 'Maven']));
+    expect(result.stats.dependencies).toBeGreaterThanOrEqual(3);
+  });
+
+  it('gives a helpful result for unsupported or empty projects', async () => {
+    const dir = fixture();
+    writeFileSync(join(dir, 'notes.txt'), 'not a project manifest\n');
+
+    const result = await runMaintenanceScan('doctor', dir);
+    const output = formatScanResult(result);
+
+    expect(result.stats.ecosystems).toContain('Unknown');
+    expect(result.findings[0].summary).toBe('no supported project manifest was detected');
+    expect(output).toContain('Detected: Unknown');
+    expect(output).toContain('DevBrief scanned 1 file');
+  });
+
+  it('keeps low-confidence ecosystem hygiene findings hidden by default', async () => {
+    const dir = fixture();
+    writeFileSync(join(dir, 'pyproject.toml'), '[project]\ndependencies = ["fastapi"]\n');
+
+    const result = await runMaintenanceScan('doctor', dir);
+
+    expect(result.ignored.some((finding) => finding.id === 'python:missing-lockfile')).toBe(true);
+    expect(result.findings.some((finding) => finding.id === 'python:missing-lockfile')).toBe(false);
+  });
+});
