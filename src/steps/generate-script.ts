@@ -36,6 +36,13 @@ export type GenerateScriptOutput = z.infer<typeof GenerateScriptOutputSchema>;
 
 const WORD_BUDGET = 350;
 
+// Risk order for ordering entries: CRITICAL first, then BREAKING, then MINOR
+const RISK_ORDER: readonly string[] = [
+  'CRITICAL',
+  'BREAKING',
+  'MINOR',
+] as const;
+
 const CLASSIFICATION_ORDER: readonly ClassifiedChangeEntry['classification'][] = [
   'breaking',
   'deprecation',
@@ -93,22 +100,51 @@ export function groupByClassification(entries: ClassifiedChangeEntry[]): {
     groups[entry.classification].push(entry);
   }
 
+  // Sort each group by risk level (CRITICAL first)
+  for (const group of Object.values(groups)) {
+    group.sort((a, b) => {
+      const aRisk = a.riskLevel ?? 'MINOR';
+      const bRisk = b.riskLevel ?? 'MINOR';
+      const aIdx = RISK_ORDER.indexOf(aRisk as any);
+      const bIdx = RISK_ORDER.indexOf(bRisk as any);
+      return aIdx - bIdx;
+    });
+  }
+
   return groups;
 }
 
 /**
+ * Returns the risk badge prefix for display in scripts.
+ */
+function getRiskBadge(riskLevel?: string): string {
+  switch (riskLevel) {
+    case 'CRITICAL':
+      return '[CRITICAL] ';
+    case 'BREAKING':
+      return '[BREAKING] ';
+    case 'MINOR':
+      return '[MINOR] ';
+    default:
+      return '';
+  }
+}
+
+/**
  * Formats a single entry's summary line for the script.
- * Uses the pre-generated summary in conversational style.
+ * Uses the pre-generated summary in conversational style with risk badge.
  */
 function formatFullEntry(entry: ClassifiedChangeEntry): string {
-  return `${entry.library_name} version ${entry.version}: ${entry.summary}`;
+  const badge = getRiskBadge(entry.riskLevel);
+  return `${badge}${entry.library_name} version ${entry.version}: ${entry.summary}`;
 }
 
 /**
  * Formats a brief entry line (library name + version only) for budget-constrained sections.
  */
 function formatBriefEntry(entry: ClassifiedChangeEntry): string {
-  return `${entry.library_name} version ${entry.version}.`;
+  const badge = getRiskBadge(entry.riskLevel);
+  return `${badge}${entry.library_name} version ${entry.version}.`;
 }
 
 /**
@@ -129,6 +165,7 @@ function formatDate(date?: Date): string {
  *
  * Template structure:
  *   - Greeting with date
+ *   - Warning if critical updates exist
  *   - Breaking changes section (always included in full)
  *   - Deprecation section (always included in full)
  *   - Feature section (full summaries, budget-constrained)
@@ -152,8 +189,17 @@ export function generateBriefingScript(
   const greeting = `Good morning! Here's your DevBrief for ${dateStr}.`;
   parts.push(greeting);
 
+  // Check for critical updates
+  const hasCritical = entries.some(e => e.riskLevel === 'CRITICAL');
+  if (hasCritical) {
+    parts.push('⚠️ ALERT: There are critical security or compatibility updates that need immediate attention.');
+  }
+
   // Track running word count
   let currentWords = countWords(greeting);
+  if (hasCritical) {
+    currentWords += countWords(parts[parts.length - 1]);
+  }
 
   // --- Priority sections: breaking & deprecation (always included in full) ---
   for (const classification of ['breaking', 'deprecation'] as const) {

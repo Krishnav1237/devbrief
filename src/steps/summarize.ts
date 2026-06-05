@@ -59,15 +59,48 @@ const LLMResponseSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the prompt from the template defined in the design document.
+ * Sorts entries by risk level (CRITICAL first, then BREAKING, then MINOR).
  */
-export function buildPrompt(libraryName: string, rawContent: string): string {
+export function sortByRiskLevel(entries: ChangeEntry[]): ChangeEntry[] {
+  const riskOrder = { CRITICAL: 0, BREAKING: 1, MINOR: 2 };
+  return [...entries].sort((a, b) => {
+    const aRisk = a.riskLevel ?? 'MINOR';
+    const bRisk = b.riskLevel ?? 'MINOR';
+    return riskOrder[aRisk] - riskOrder[bRisk];
+  });
+}
+
+/**
+ * Builds the prompt from the template defined in the design document.
+ * Includes risk context to emphasize critical items.
+ */
+export function buildPrompt(
+  libraryName: string,
+  rawContent: string,
+  riskLevel?: string,
+  reasoning?: string
+): string {
+  let riskContext = '';
+  if (riskLevel === 'CRITICAL') {
+    riskContext = '\n\nNOTE: This has been flagged as a CRITICAL security or compatibility issue.';
+    if (reasoning) {
+      riskContext += ` ${reasoning}`;
+    }
+    riskContext += ' This summary should emphasize urgency.';
+  } else if (riskLevel === 'BREAKING') {
+    riskContext = '\n\nNOTE: This contains breaking changes.';
+    if (reasoning) {
+      riskContext += ` ${reasoning}`;
+    }
+    riskContext += ' Ensure the summary highlights what needs to change.';
+  }
+
   return `You are a developer tools assistant. Analyze the following changelog entry for the library "${libraryName}" and respond with a JSON object.
 
 Changelog content:
 ---
 ${rawContent}
----
+---${riskContext}
 
 Respond with ONLY a JSON object in this exact format:
 {
@@ -264,13 +297,21 @@ export const summarizeStep = {
     // Initialize the store (idempotent)
     initStore();
 
+    // Sort entries by risk level (CRITICAL first)
+    const sortedEntries = sortByRiskLevel(newEntries);
+
     const classifiedEntries: ClassifiedChangeEntry[] = [];
     const stepErrors: StepError[] = [...(errors ?? [])];
 
-    for (const entry of newEntries) {
+    for (const entry of sortedEntries) {
       // Truncate raw_content to 3000 chars to stay within Groq's free tier token limit (8k)
       const truncatedContent = entry.raw_content.slice(0, 3000);
-      const prompt = buildPrompt(entry.library_name, truncatedContent);
+      const prompt = buildPrompt(
+        entry.library_name,
+        truncatedContent,
+        entry.riskLevel,
+        entry.reasoning
+      );
 
       let llmResponse: string;
       try {

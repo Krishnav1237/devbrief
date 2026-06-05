@@ -43,7 +43,7 @@ export type TTSOutput = z.infer<typeof TTSOutputSchema>;
 // Constants
 // ---------------------------------------------------------------------------
 
-const SARVAM_TTS_ENDPOINT = 'https://api.sarvam.ai/text-to-speech/stream';
+const SARVAM_TTS_ENDPOINT = 'https://api.sarvam.ai/text-to-speech';
 const MAX_CHARS_PER_CHUNK = 2500;
 const AUDIO_DIR = path.join(os.homedir(), '.devbrief', 'audio');
 
@@ -143,15 +143,17 @@ async function callSarvamTTS(text: string, apiKey: string): Promise<string> {
           'Content-Type': 'application/json',
           'api-subscription-key': apiKey,
         },
-        responseType: 'arraybuffer',
       },
     );
 
-    return Buffer.from(response.data).toString('base64');
+    const base64Audio = response.data?.audios?.[0];
+    if (!base64Audio) {
+      throw new Error('Sarvam API did not return audio content');
+    }
+    return base64Audio;
   } catch (err: any) {
-    if (err.response) {
-      const body = Buffer.from(err.response.data).toString('utf-8');
-      console.error('[tts] Sarvam error response:', body);
+    if (err.response?.data) {
+      console.error('[tts] Sarvam error response:', JSON.stringify(err.response.data));
     }
     throw err;
   }

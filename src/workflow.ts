@@ -334,10 +334,28 @@ async function runDirectPipeline(
     errors = notifyOutput.errors;
 
     // --- finalizeRunStep ---
+    // Calculate risk counts from classified entries
+    let criticalCount = 0;
+    let breakingCount = 0;
+    let minorCount = 0;
+    
+    for (const entry of summarizeOutput.classifiedEntries) {
+      if (entry.riskLevel === 'CRITICAL') {
+        criticalCount++;
+      } else if (entry.riskLevel === 'BREAKING') {
+        breakingCount++;
+      } else {
+        minorCount++;
+      }
+    }
+
     runRecord.errors = errors;
     runRecord.has_errors = errors.length > 0;
     runRecord.status = terminalStatus;
     runRecord.completed_at = new Date().toISOString();
+    runRecord.criticalCount = criticalCount;
+    runRecord.breakingCount = breakingCount;
+    runRecord.minorCount = minorCount;
 
     updateRunRecord(runRecord);
     console.log(

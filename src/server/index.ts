@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { isRunInProgress, runDevBriefPipeline } from '../workflow.js';
 import { getRunRecords, getRunRecord } from '../utils/store.js';
 import type { DigestResponse } from '../models/index.js';
+import { registerDashboardRoutes } from './dashboard.js';
 
 // ---------------------------------------------------------------------------
 // Tailscale IP detection
@@ -125,6 +126,9 @@ export function createApp(
       briefing_script: record.briefing_script ?? '',
       audio_url: audioUrl,
       generated_at: record.completed_at ?? record.triggered_at,
+      criticalCount: record.criticalCount,
+      breakingCount: record.breakingCount,
+      minorCount: record.minorCount,
     };
 
     return c.json(digest);
@@ -150,6 +154,9 @@ export function createApp(
       },
     });
   });
+
+  // Register dashboard routes
+  registerDashboardRoutes(app);
 
   return app;
 }

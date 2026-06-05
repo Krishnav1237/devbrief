@@ -18,6 +18,9 @@ export const ChangeEntrySchema = z.object({
   summary: z.string().nullable(),
   confidence_flag: z.boolean(),
   scraped_at: z.string().datetime(),
+  riskLevel: z.enum(['CRITICAL', 'BREAKING', 'MINOR']).optional(),
+  severityScore: z.number().min(0).max(100).optional(),
+  reasoning: z.string().optional(),
 });
 
 export type ChangeClassification = z.infer<typeof ChangeClassificationSchema>;

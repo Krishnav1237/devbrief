@@ -27,6 +27,9 @@ export const RunRecordSchema = z.object({
   digest_link: z.string().nullable(),
   errors: z.array(StepErrorSchema),
   completed_at: z.string().datetime().nullable(),
+  criticalCount: z.number().int().nonnegative().optional(),
+  breakingCount: z.number().int().nonnegative().optional(),
+  minorCount: z.number().int().nonnegative().optional(),
 });
 
 export type RunStatus = z.infer<typeof RunStatusSchema>;

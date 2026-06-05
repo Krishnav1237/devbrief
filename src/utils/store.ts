@@ -46,7 +46,10 @@ export function initStore(dbPath?: string): Database.Database {
       classification TEXT,
       summary        TEXT,
       confidence_flag INTEGER NOT NULL DEFAULT 0,
-      scraped_at     TEXT NOT NULL
+      scraped_at     TEXT NOT NULL,
+      risk_level     TEXT,
+      severity_score INTEGER,
+      reasoning      TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_ce_library
@@ -67,7 +70,10 @@ export function initStore(dbPath?: string): Database.Database {
       audio_url           TEXT,
       digest_link         TEXT,
       errors              TEXT NOT NULL DEFAULT '[]',
-      completed_at        TEXT
+      completed_at        TEXT,
+      critical_count      INTEGER DEFAULT 0,
+      breaking_count      INTEGER DEFAULT 0,
+      minor_count         INTEGER DEFAULT 0
     );
   `);
 
@@ -119,9 +125,10 @@ export function storeEntries(entries: ChangeEntry[]): void {
   const insert = store.prepare(`
     INSERT OR IGNORE INTO change_entries
       (entry_id, run_id, library_name, version, source_url, raw_content,
-       classification, summary, confidence_flag, scraped_at)
+       classification, summary, confidence_flag, scraped_at,
+       risk_level, severity_score, reasoning)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const tx = store.transaction((items: ChangeEntry[]) => {
@@ -137,6 +144,9 @@ export function storeEntries(entries: ChangeEntry[]): void {
         e.summary,
         e.confidence_flag ? 1 : 0,
         e.scraped_at,
+        e.riskLevel ?? null,
+        e.severityScore ?? null,
+        e.reasoning ?? null,
       );
     }
   });
@@ -163,6 +173,25 @@ export function updateEntryClassification(
     .run(classification, summary, confidenceFlag ? 1 : 0, entryId);
 }
 
+/**
+ * Updates risk information for a change entry.
+ */
+export function updateEntryRisk(
+  entryId: string,
+  riskLevel: string,
+  severityScore: number,
+  reasoning: string,
+): void {
+  const store = getStore();
+  store
+    .prepare(
+      `UPDATE change_entries
+       SET risk_level = ?, severity_score = ?, reasoning = ?
+       WHERE entry_id = ?`,
+    )
+    .run(riskLevel, severityScore, reasoning, entryId);
+}
+
 // ---------------------------------------------------------------------------
 // Run_Record operations
 // ---------------------------------------------------------------------------
@@ -177,8 +206,9 @@ export function storeRunRecord(record: RunRecord): void {
       `INSERT INTO run_records
         (run_id, triggered_at, trigger_type, status, has_errors,
          libraries_processed, new_change_count, briefing_script,
-         audio_url, digest_link, errors, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         audio_url, digest_link, errors, completed_at,
+         critical_count, breaking_count, minor_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       record.run_id,
@@ -193,6 +223,9 @@ export function storeRunRecord(record: RunRecord): void {
       record.digest_link,
       JSON.stringify(record.errors),
       record.completed_at,
+      record.criticalCount ?? 0,
+      record.breakingCount ?? 0,
+      record.minorCount ?? 0,
     );
 }
 
@@ -206,7 +239,8 @@ export function updateRunRecord(record: RunRecord): void {
       `UPDATE run_records SET
         triggered_at = ?, trigger_type = ?, status = ?, has_errors = ?,
         libraries_processed = ?, new_change_count = ?, briefing_script = ?,
-        audio_url = ?, digest_link = ?, errors = ?, completed_at = ?
+        audio_url = ?, digest_link = ?, errors = ?, completed_at = ?,
+        critical_count = ?, breaking_count = ?, minor_count = ?
        WHERE run_id = ?`,
     )
     .run(
@@ -221,6 +255,9 @@ export function updateRunRecord(record: RunRecord): void {
       record.digest_link,
       JSON.stringify(record.errors),
       record.completed_at,
+      record.criticalCount ?? 0,
+      record.breakingCount ?? 0,
+      record.minorCount ?? 0,
       record.run_id,
     );
 }
@@ -265,6 +302,9 @@ function rowToChangeEntry(row: Record<string, unknown>): ChangeEntry {
     summary: (row.summary as string) ?? null,
     confidence_flag: row.confidence_flag === 1,
     scraped_at: row.scraped_at as string,
+    riskLevel: (row.risk_level as ChangeEntry['riskLevel']) ?? undefined,
+    severityScore: row.severity_score as number | undefined,
+    reasoning: (row.reasoning as string) ?? undefined,
   };
 }
 
@@ -282,5 +322,8 @@ function rowToRunRecord(row: Record<string, unknown>): RunRecord {
     digest_link: (row.digest_link as string) ?? null,
     errors: JSON.parse(row.errors as string) as StepError[],
     completed_at: (row.completed_at as string) ?? null,
+    criticalCount: row.critical_count as number | undefined,
+    breakingCount: row.breaking_count as number | undefined,
+    minorCount: row.minor_count as number | undefined,
   };
 }

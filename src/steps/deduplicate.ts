@@ -10,7 +10,10 @@ import {
   initStore,
   getExistingEntriesForLibrary,
   storeEntries,
+  updateEntryRisk,
 } from '../utils/store.js';
+import { classifyRisk } from '../utils/risk-classifier.js';
+import { parseDependencies, type ParsedDependency } from '../utils/package-parser.js';
 
 // ---------------------------------------------------------------------------
 // Zod schemas for step I/O
@@ -150,17 +153,52 @@ export const deduplicateStep = {
     // Deduplicate
     const { newEntries, duplicateCount } = deduplicateEntries(entries, allExisting);
 
+    // Parse user's project dependencies for risk classification
+    let userDependencies: ParsedDependency[] = [];
+    try {
+      userDependencies = await parseDependencies();
+    } catch (err) {
+      console.warn('[deduplicate] Failed to parse dependencies:', err instanceof Error ? err.message : String(err));
+    }
+
+    // Classify risk for each new entry
+    const entriesWithRisk: ChangeEntry[] = [];
+    for (const entry of newEntries) {
+      try {
+        const riskClass = await classifyRisk(
+          entry.library_name,
+          entry.version,
+          entry.raw_content,
+          userDependencies
+        );
+        
+        entriesWithRisk.push({
+          ...entry,
+          riskLevel: riskClass.riskLevel,
+          severityScore: riskClass.severityScore,
+          reasoning: riskClass.reasoning,
+        });
+      } catch (err) {
+        console.warn(
+          `[deduplicate] Risk classification failed for ${entry.library_name}:`,
+          err instanceof Error ? err.message : String(err)
+        );
+        // Continue without risk classification
+        entriesWithRisk.push(entry);
+      }
+    }
+
     // Store new entries
-    if (newEntries.length > 0) {
-      storeEntries(newEntries);
+    if (entriesWithRisk.length > 0) {
+      storeEntries(entriesWithRisk);
     }
 
     console.log(
-      `[deduplicate] ${newEntries.length} new entries, ${duplicateCount} duplicates filtered`,
+      `[deduplicate] ${entriesWithRisk.length} new entries, ${duplicateCount} duplicates filtered`,
     );
 
     // If no new entries, signal skip
-    if (newEntries.length === 0) {
+    if (entriesWithRisk.length === 0) {
       return {
         newEntries: [],
         duplicateCount,
@@ -170,7 +208,7 @@ export const deduplicateStep = {
     }
 
     return {
-      newEntries,
+      newEntries: entriesWithRisk,
       duplicateCount,
       errors: errors ?? [],
       pipelineStatus: 'continue',
