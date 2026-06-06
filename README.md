@@ -96,6 +96,8 @@ Recommended action: Review routing handlers in the affected files and test endpo
 
 DevBrief provides targeted safeguards for vibe coders and AI-assisted workflows:
 
+- **Vibe Shield Runtime Sandbox (`devbrief shield -- <cmd>`):** Runs target commands under a dynamic execution guard. Intercepts and blocks filesystem modifications outside the workspace directory, blocks shell injections, restricts reading of sensitive directories (`~/.ssh`, `~/.aws`, `~/.kube`, `/etc/passwd`), and stops HTTP/HTTPS secrets leaks to untrusted domains. Supports Node.js and Python runtimes natively.
+- **Automated Secret Extraction (`devbrief clean-secrets`):** Finds hardcoded secrets and placeholders in your code, extracts them into local `.env` files, and automatically updates your file imports and references to load them from environment variables.
 - **Git Pre-commit Hook (`devbrief init-hook`):** Automatically registers a pre-commit hook that intercepts commits and runs `devbrief doctor --exit-code --quiet`. It blocks commits if critical vulnerabilities, configuration errors, or env drifts are found.
 - **Unignored `.env` Guard:** Checks if your local environment configuration files are unignored in `.gitignore` (using native `git check-ignore`), preventing accidental leaks of active API keys.
 - **AI-Generated Placeholder Detection:** Scans codebase for standard LLM placeholders (e.g. `YOUR_API_KEY_HERE`, `sk-proj-placeholder`) that indicate incomplete configuration.
@@ -153,6 +155,8 @@ All primary and secondary commands support formatting options (e.g. for CI/CD in
 - `npx devbrief services` — Detect drift in third-party API SDKs.
 - `npx devbrief weekly` — Builds a compact weekly plan.
 - `npx devbrief fix --safe-only` — Automatically applies low-risk, high-confidence minor and patch dependency updates (requires a clean git working directory, checked via `git status --porcelain`).
+- `npx devbrief clean-secrets` — Scans files for hardcoded secrets, extracts them to `.env`, and updates code references.
+- `npx devbrief shield -- <cmd>` — Runs a command under dynamic runtime sandbox protection (intercepts filesystem writes/reads, shell injections, and network leaks).
 - `npx devbrief init-hook` — Installs a Git pre-commit hook that runs automated scans on every commit, blocking commits with critical vulnerabilities.
 
 ---

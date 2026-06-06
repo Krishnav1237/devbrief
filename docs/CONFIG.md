@@ -28,3 +28,17 @@ DevBrief stores local configuration and state in your user home directory:
 - `~/.devbrief/registry-cache/` — Package version registry lookup responses cached from npm/PyPI/Crates/Go Proxy (12h TTL)
 - `~/.devbrief/stack.json` — Tracks release monitoring (legacy)
 - `~/.devbrief/audio/` — Stores generated briefing recordings (legacy)
+- `~/.devbrief/shield/` — Holds Vibe Shield preloader files (`node/preload.cjs`, `python/sitecustomize.py`)
+
+---
+
+## Vibe Shield Environment Settings
+
+The `devbrief shield -- <cmd>` command configures the dynamic runtime sandbox using standard environment variables passed to the child process:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEVBRIEF_SHIELD_WORKSPACE` | Absolute current directory | Confines filesystem writes/deletions to this directory. |
+| `DEVBRIEF_SHIELD_DRY_RUN` | `false` | If set to `true`, Vibe Shield audits actions and logs warnings but does not block execution. |
+| `DEVBRIEF_SHIELD_VERBOSE` | `false` | If set to `true`, prints warning messages for blocked actions and logs audited events. |
+| `DEVBRIEF_SHIELD_SECRETS` | Extracted from environment and `.env` | JSON string of active credential names and values monitored to prevent HTTP exfiltration to untrusted domains. |

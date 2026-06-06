@@ -11,6 +11,10 @@ DevBrief uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `shield -- <cmd>` command: runtime execution sandbox wrapper to block filesystem writes/deletions outside workspace, restrict reading sensitive folders (`~/.ssh`, `~/.aws`, `~/.kube`, `/etc/passwd`), prevent command injections, and block HTTP exfiltration of secrets to untrusted domains. Supports Node.js and Python runtimes.
+- `clean-secrets` command: scans codebase for hardcoded secrets and placeholders, extracts them into `.env`, and updates file references to load them from environment.
+- Automated Node.js preload injection (`preload.cjs`) with `require` overriding.
+- Automated Python preload injection (`sitecustomize.py`) using `sys.addaudithook` and socket connections hooks.
 - `risk` command: dedicated dependency and vulnerability risk scan
 - `ops` command: operational health signals (health checks, scheduled workflow timeouts, backup hints)
 - `cost` command: local build and dependency weight signals
