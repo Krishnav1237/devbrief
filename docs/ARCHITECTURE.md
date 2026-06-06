@@ -52,13 +52,12 @@ DevBrief maintains a clear separation of concern and flags scanners based on the
 - **Upgrade Confidence** (`upgrade-advisor.ts`): Evaluates target package versions against your repository imports to verify if you actively use affected entry points. Supports **npm**, **PyPI**, **Crates.io** (with proper User-Agent headers), and **Go Proxy** (with capital module path escaping) registries via high-performance direct HTTP requests routed through a **Resilient Registry Client** (`registry-client.ts`) featuring outbound throttling (limit: 5), exponential retry with jitter, 12h local file cache, and clean offline-first degradation (`DEVBRIEF_OFFLINE=1`).
 - **Safe Remediation & Git Hook Automation** (`cli/index.ts`): 
   - Applies automatic minor/patch upgrades via `fix --safe-only` in a workspace-aware manner, verified by `git status --porcelain`.
+  - Launches a zero-dependency **Interactive CLI selection prompt** in TTY environments when running `devbrief fix` (without `--safe-only`), letting developers review and toggle upgrades/remediations using raw TTY keypress console menus.
   - Installs/updates pre-commit git hooks via `init-hook` to run scans automatically on commit (`devbrief doctor --exit-code --quiet`), supporting automatic backups of pre-existing hooks.
-- **Vibe Shield Runtime Sandbox (`src/cli/shield.ts`):**
-  Enforces a dynamic, environment-level runtime sandbox around code execution.
-  - **Environment-Level Injections:** Hooks into process launch parameters dynamically by writing preloaders to `~/.devbrief/shield/`. Sets `NODE_OPTIONS="--require ..."` for Node.js (CommonJS) and prepends `PYTHONPATH` to autoload `sitecustomize.py` for Python.
-  - **Filesystem Confinement:** Restricts filesystem write and delete API calls (`fs` methods in Node, and audit events in Python) to the workspace root directory (and standard temp directories). Restricts reading of sensitive user credential folders (`~/.ssh`, `~/.aws`, `~/.kube`, `/etc/passwd`).
-  - **Command Injection Prevention:** Overrides subprocess spawning APIs to analyze command strings for shell injections, blocking chained invocations running downloader tools or shells (e.g. `curl`, `wget`, `nc`, `/bin/sh`).
-  - **Secrets Leakage Prevention:** Overrides outbound socket connection writes and HTTP request wrappers. Scans payloads, headers, and paths for credentials loaded from `.env`. Blocks the connection in real-time if a secret is sent to any domain that is not explicitly trusted for that secret (e.g., blocking OpenAI keys sent to arbitrary endpoints while allowing them to `api.openai.com`).
+- **Dynamic Scanner Plugin Loader (`src/maintenance/engine.ts`):**
+  - Scans global (`~/.devbrief/plugins/`) and project-local (`.devbrief/plugins/`) directories at runtime.
+  - Dynamically imports custom scanner plugin modules (conforming to the standard `Scanner` interface) and registers them at runtime.
+- **Vibe Shield Runtime Sandbox (Optional / Advanced):** Enforces a dynamic, environment-level runtime sandbox around code execution. For detailed architecture, integration mechanics, and environment configurations, see [docs/SHIELD.md](SHIELD.md).
 
 ### Beta
 - **Infrastructure Drift** (`infra-scanner.ts`): Analyzes Docker base images, Compose files, and GitHub Actions setups for outdated instructions or runner drift.

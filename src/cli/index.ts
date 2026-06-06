@@ -375,12 +375,96 @@ export function detectTestCommands(projectPath: string, modifiedFiles: Set<strin
   return testCommandsToRun;
 }
 
-export async function fixCommand(options?: { path?: string; safeOnly?: boolean; verify?: boolean }): Promise<string> {
-  if (!options?.safeOnly) {
-    return 'REVIEW: use `devbrief fix --safe-only` so risky upgrades are never applied silently';
-  }
+function promptInteractiveFixes(findings: any[]): Promise<any[]> {
+  if (findings.length === 0) return Promise.resolve([]);
 
-  const projectPath = options.path ? path.resolve(options.path) : process.cwd();
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+
+    const choices = findings.map((f) => {
+      const isSafe = f.confidence >= 8 && f.effort === '5 min';
+      return {
+        finding: f,
+        name: `${f.recommendation === 'remediate' ? 'Remediate' : 'Upgrade'} ${f.packageName || f.files?.join(', ') || ''} - ${f.summary} (${f.effort}, Confidence: ${f.confidence >= 8 ? 'High' : 'Medium'})`,
+        selected: isSafe,
+      };
+    });
+
+    let cursor = 0;
+
+    const hideCursor = () => stdout.write('\x1b[?25l');
+    const showCursor = () => stdout.write('\x1b[?25h');
+    const clearLines = (count: number) => {
+      for (let i = 0; i < count; i++) {
+        stdout.write('\x1b[1A\x1b[2K');
+      }
+    };
+
+    const render = (firstTime = false) => {
+      if (!firstTime) {
+        clearLines(choices.length + 3);
+      }
+      stdout.write(`\n\x1b[36m? Select fixes to apply (Space to toggle, Enter to confirm):\x1b[0m\n`);
+      choices.forEach((choice, idx) => {
+        const isCursor = idx === cursor ? '\x1b[36m❯\x1b[0m' : ' ';
+        const isSelected = choice.selected ? '\x1b[32m[x]\x1b[0m' : '[ ]';
+        stdout.write(`${isCursor} ${isSelected} ${choice.name}\n`);
+      });
+      stdout.write(`\n`);
+    };
+
+    hideCursor();
+    render(true);
+
+    const onKeypress = (str: string, key: any) => {
+      if (!key) return;
+      if (key.ctrl && key.name === 'c') {
+        cleanup();
+        resolve([]);
+        return;
+      }
+
+      if (key.name === 'up') {
+        cursor = (cursor - 1 + choices.length) % choices.length;
+        render();
+      } else if (key.name === 'down') {
+        cursor = (cursor + 1) % choices.length;
+        render();
+      } else if (key.name === 'space') {
+        choices[cursor].selected = !choices[cursor].selected;
+        render();
+      } else if (key.name === 'return' || key.name === 'enter') {
+        cleanup();
+        resolve(choices.filter((c) => c.selected).map((c) => c.finding));
+      }
+    };
+
+    const cleanup = () => {
+      showCursor();
+      stdin.removeListener('keypress', onKeypress);
+      if (stdin.isTTY) {
+        stdin.setRawMode(false);
+      }
+    };
+
+    readline.emitKeypressEvents(stdin);
+    if (stdin.isTTY) {
+      stdin.setRawMode(true);
+    }
+    stdin.on('keypress', onKeypress);
+  });
+}
+
+import readline from 'readline';
+
+export async function fixCommand(options?: { path?: string; safeOnly?: boolean; verify?: boolean }): Promise<string> {
+  const projectPath = options?.path ? path.resolve(options.path) : process.cwd();
+
+  const isInteractive = !options?.safeOnly && process.stdout.isTTY;
+  if (!options?.safeOnly && !isInteractive) {
+    return 'REVIEW: use `devbrief fix --safe-only` so risky upgrades are never applied silently in non-TTY environments';
+  }
 
   // Check if git is a repo if verify is requested
   let isGit = false;
@@ -414,14 +498,27 @@ export async function fixCommand(options?: { path?: string; safeOnly?: boolean; 
   }
 
   const result = await runMaintenanceScan('doctor', projectPath);
-  const safeFixes = result.findings.filter((finding) =>
+  const allFixes = result.findings.filter((finding) =>
     (finding.recommendation === 'remediate' || finding.recommendation === 'upgrade')
-    && finding.confidence >= 8
-    && finding.effort === '5 min'
     && finding.packageName
   );
 
-  if (safeFixes.length === 0) {
+  let targetFixes = [];
+  if (isInteractive) {
+    if (allFixes.length === 0) {
+      return 'SAFE: No remediable or upgradable findings found.';
+    }
+    targetFixes = await promptInteractiveFixes(allFixes);
+    if (targetFixes.length === 0) {
+      return 'Aborted. No fixes selected.';
+    }
+  } else {
+    targetFixes = allFixes.filter((finding) =>
+      finding.confidence >= 8 && finding.effort === '5 min'
+    );
+  }
+
+  if (targetFixes.length === 0) {
     return [
       'SAFE: no high-confidence automatic fix found',
       'No files changed.',
@@ -433,11 +530,11 @@ export async function fixCommand(options?: { path?: string; safeOnly?: boolean; 
   const updatedPackages: string[] = [];
   const modifiedFiles = new Set<string>();
 
-  for (const fix of safeFixes) {
+  for (const fix of targetFixes) {
     const pkg = fix.packageName!;
     
     // Resolve which manifest defines this dependency
-    const manifestFile = fix.files?.find((file) =>
+    const manifestFile = fix.files?.find((file: string) =>
       file.endsWith('package.json') ||
       file.endsWith('Cargo.toml') ||
       file.endsWith('go.mod') ||
@@ -517,7 +614,7 @@ export async function fixCommand(options?: { path?: string; safeOnly?: boolean; 
     }
   }
 
-  lines.push(`\nSUCCESS: Processed ${safeFixes.length} safe fixes.`);
+  lines.push(`\nSUCCESS: Processed ${targetFixes.length} safe fixes.`);
   if (updatedPackages.length > 0) {
     lines.push(`Modified packages: ${updatedPackages.join(', ')}`);
     lines.push(`Files changed: ${[...modifiedFiles].join(', ')}`);
@@ -623,7 +720,7 @@ export function createProgram(): Command {
           ['weekly', 'Builds a compact weekly plan'],
           ['fix', 'Remediates low-risk, high-confidence local issues'],
           ['clean-secrets', 'Extract hardcoded secrets and placeholders into .env'],
-          ['shield -- <cmd>', 'Run a command under DevBrief runtime protection'],
+          ['shield -- <cmd>', 'Run a command under DevBrief runtime protection (Optional, Advanced)'],
           ['init-hook', 'Install a Git pre-commit hook to run scans automatically'],
         ];
 
@@ -796,7 +893,7 @@ Examples:
 
   program
     .command('shield')
-    .description('Run a command under DevBrief runtime protection')
+    .description('Run a command under DevBrief runtime protection (Optional, Advanced)')
     .option('--path <path>', 'Project path to scan')
     .option('--verbose', 'Print all audited calls')
     .option('--dry-run', 'Audit only, do not block')

@@ -14,8 +14,94 @@ const SECRET_PATTERNS = [
   { name: 'GENERIC_SECRET_PLACEHOLDER', regex: /\bTODO_ENTER_[A-Z0-9_]+\b/i },
 ];
 
-function escapeRegex(str: string): string {
-  return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+interface StringLiteral {
+  value: string;
+  raw: string;
+  start: number;
+  end: number;
+}
+
+export function extractStringLiterals(content: string, ext: string): StringLiteral[] {
+  const literals: StringLiteral[] = [];
+  let i = 0;
+  const len = content.length;
+  
+  const isJS = ['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'].includes(ext);
+  const isPy = ext === 'py';
+  const isGo = ext === 'go';
+  const isRs = ext === 'rs';
+
+  while (i < len) {
+    // Check for comments
+    if (isJS || isGo || isRs) {
+      if (content[i] === '/' && content[i + 1] === '/') {
+        while (i < len && content[i] !== '\n') i++;
+        continue;
+      }
+      if (content[i] === '/' && content[i + 1] === '*') {
+        i += 2;
+        while (i < len && !(content[i] === '*' && content[i + 1] === '/')) i++;
+        i += 2;
+        continue;
+      }
+    }
+    if (isPy) {
+      if (content[i] === '#') {
+        while (i < len && content[i] !== '\n') i++;
+        continue;
+      }
+    }
+
+    // Check for string literals
+    const char = content[i];
+    if (char === '"' || char === "'" || (char === '`' && (isJS || isGo))) {
+      let isTriple = false;
+      if (isPy && ((char === '"' && content[i+1] === '"' && content[i+2] === '"') || (char === "'" && content[i+1] === "'" && content[i+2] === "'"))) {
+        isTriple = true;
+      }
+
+      const quote = isTriple ? content.slice(i, i + 3) : char;
+      const start = i;
+      i += isTriple ? 3 : 1;
+      let val = '';
+      let escaped = false;
+
+      while (i < len) {
+        if (isTriple) {
+          if (content.slice(i, i + 3) === quote) {
+            i += 3;
+            break;
+          }
+        } else {
+          if (content[i] === '\\' && !escaped) {
+            escaped = true;
+            val += content[i];
+            i++;
+            continue;
+          }
+          if (content[i] === quote && !escaped) {
+            i++;
+            break;
+          }
+        }
+        escaped = false;
+        val += content[i];
+        i++;
+      }
+      
+      const raw = content.slice(start, i);
+      literals.push({
+        value: val,
+        raw,
+        start,
+        end: i
+      });
+      continue;
+    }
+
+    i++;
+  }
+  return literals;
 }
 
 export async function cleanSecretsCommand(options?: { path?: string }): Promise<string> {
@@ -43,42 +129,30 @@ export async function cleanSecretsCommand(options?: { path?: string }): Promise<
       continue;
     }
 
-    let fileModified = false;
-    const ext = file.split('.').pop()?.toLowerCase();
+    const ext = file.split('.').pop()?.toLowerCase() || '';
+    const literals = extractStringLiterals(content, ext);
+    const replacements: { start: number; end: number; val: string }[] = [];
 
-    for (const pattern of SECRET_PATTERNS) {
-      // Find all matches in the content
-      const regex = new RegExp(pattern.regex, 'g');
-      let match;
-      
-      // Reset regex index
-      regex.lastIndex = 0;
-      const fileMatches: string[] = [];
-      while ((match = regex.exec(content)) !== null) {
-        fileMatches.push(match[0]);
-      }
-
-      for (const matchedValue of fileMatches) {
-        let entry = extractedSecrets.get(matchedValue);
-        if (!entry) {
-          // Generate a unique env variable name
-          let baseVarName = pattern.name;
-          let counter = 2;
-          let varName = baseVarName;
-          while (envVarNames.has(varName)) {
-            varName = `${baseVarName}_${counter}`;
-            counter++;
+    for (const literal of literals) {
+      for (const pattern of SECRET_PATTERNS) {
+        const match = literal.value.match(pattern.regex);
+        if (match && match[0] === literal.value) {
+          let entry = extractedSecrets.get(literal.value);
+          if (!entry) {
+            let baseVarName = pattern.name;
+            let counter = 2;
+            let varName = baseVarName;
+            while (envVarNames.has(varName)) {
+              varName = `${baseVarName}_${counter}`;
+              counter++;
+            }
+            entry = { varName, value: literal.value };
+            extractedSecrets.set(literal.value, entry);
+            envVarNames.add(varName);
           }
-          entry = { varName, value: matchedValue };
-          extractedSecrets.set(matchedValue, entry);
-          envVarNames.add(varName);
-        }
 
-        // Generate quotes regex to match the surrounding string literal
-        const quoteRegex = new RegExp(`(['"\`])${escapeRegex(matchedValue)}\\1`, 'g');
-        if (quoteRegex.test(content)) {
           let replacement = '';
-          if (['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'].includes(ext ?? '')) {
+          if (['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'].includes(ext)) {
             replacement = `process.env.${entry.varName}`;
           } else if (ext === 'py') {
             replacement = `os.environ.get("${entry.varName}")`;
@@ -87,18 +161,25 @@ export async function cleanSecretsCommand(options?: { path?: string }): Promise<
           } else if (ext === 'rs') {
             replacement = `std::env::var("${entry.varName}").unwrap_or_default()`;
           } else {
-            // Default fallback
             replacement = `process.env.${entry.varName}`;
           }
 
-          content = content.replace(quoteRegex, replacement);
-          fileModified = true;
+          replacements.push({
+            start: literal.start,
+            end: literal.end,
+            val: replacement
+          });
+          break;
         }
       }
     }
 
-    if (fileModified) {
-      // Add required ecosystem imports
+    if (replacements.length > 0) {
+      replacements.sort((a, b) => b.start - a.start);
+      for (const rep of replacements) {
+        content = content.slice(0, rep.start) + rep.val + content.slice(rep.end);
+      }
+
       if (ext === 'py' && !content.includes('import os')) {
         content = 'import os\n' + content;
       } else if (ext === 'go' && !content.includes('"os"') && !content.includes('import "os"')) {

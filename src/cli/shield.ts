@@ -28,7 +28,8 @@ export async function shieldCommand(
   const nodePreloadPath = path.join(nodeDir, 'preload.cjs');
   const pythonPreloadPath = path.join(pythonDir, 'sitecustomize.py');
 
-  fs.writeFileSync(nodePreloadPath, NODE_PRELOAD_CODE, 'utf-8');
+  const finalNodePreloadCode = `if (typeof globalThis.__devbrief_shield_loaded !== 'undefined') return;\nglobalThis.__devbrief_shield_loaded = true;\n${NODE_PRELOAD_CODE}`;
+  fs.writeFileSync(nodePreloadPath, finalNodePreloadCode, 'utf-8');
   fs.writeFileSync(pythonPreloadPath, PYTHON_PRELOAD_CODE, 'utf-8');
 
   // 2. Extract Secrets
@@ -73,8 +74,13 @@ export async function shieldCommand(
   const binary = subCommand[0];
   const binaryName = path.basename(binary).toLowerCase();
 
+  const nodeVersionMajor = parseInt(process.versions.node.split('.')[0], 10);
+  const importFlag = nodeVersionMajor >= 20
+    ? `--import "file://${nodePreloadPath.replace(/\\/g, '/')}"`
+    : '';
+
   if (binaryName.startsWith('node') || binaryName === 'npm' || binaryName === 'npx' || binaryName === 'pnpm' || binaryName === 'yarn' || binaryName === 'bun') {
-    childEnv.NODE_OPTIONS = `--require "${nodePreloadPath}" ${process.env.NODE_OPTIONS || ''}`.trim();
+    childEnv.NODE_OPTIONS = `--require "${nodePreloadPath}" ${importFlag} ${process.env.NODE_OPTIONS || ''}`.trim();
   }
 
   // Prepend PYTHONPATH and NODE_OPTIONS to child process environment to support nested scripts
@@ -83,7 +89,7 @@ export async function shieldCommand(
     ? `${pythonDir}${path.delimiter}${existingPythonPath}`
     : pythonDir;
     
-  childEnv.NODE_OPTIONS = childEnv.NODE_OPTIONS || `--require "${nodePreloadPath}"`;
+  childEnv.NODE_OPTIONS = childEnv.NODE_OPTIONS || `--require "${nodePreloadPath}" ${importFlag}`.trim();
 
   // 4. Spawn Subprocess
   return new Promise((resolve) => {

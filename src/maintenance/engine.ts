@@ -18,11 +18,45 @@ import type { FindingCategory, MaintenanceFinding, ProjectContext, ScanResult, S
 import { vibeSecurityScanner, vibeDependencyScanner } from './vibe-scanner.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { pathToFileURL } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 import { typosquattingScanner } from './typosquatting-scanner.js';
+
+async function loadScannerPlugins(projectPath: string): Promise<Scanner[]> {
+  const homeDir = os.homedir();
+  const globalPluginsDir = path.join(homeDir, '.devbrief', 'plugins');
+  const localPluginsDir = path.join(projectPath, '.devbrief', 'plugins');
+  
+  const dirs = [globalPluginsDir, localPluginsDir];
+  const plugins: Scanner[] = [];
+
+  for (const dir of dirs) {
+    if (fs.existsSync(dir)) {
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs')) {
+            const absolutePath = path.join(dir, file);
+            const fileUrl = pathToFileURL(absolutePath).href;
+            const module = await import(fileUrl);
+            const scanner = module.default || module.scanner;
+            if (scanner && typeof scanner.name === 'string' && typeof scanner.scan === 'function') {
+              plugins.push(scanner);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[engine] Failed to load plugin from ${dir}: ${err.message}`);
+      }
+    }
+  }
+
+  return plugins;
+}
 
 export const scannerRegistry: Record<string, Scanner[]> = {
   risk: [dependencyRiskScanner, vulnerabilityIntelligenceScanner, javascriptScanner, pythonScanner, rustScanner, goScanner, javaScanner, vibeDependencyScanner, typosquattingScanner],
@@ -171,7 +205,16 @@ export async function runMaintenanceScan(
 
   const findings: MaintenanceFinding[] = [];
 
-  for (const scanner of scannerRegistry[command]) {
+  const loadedPlugins = await loadScannerPlugins(resolvedPath);
+  const activeScanners = [...scannerRegistry[command]];
+  for (const plugin of loadedPlugins) {
+    const categories: string[] = (plugin as any).categories || ['doctor'];
+    if (categories.includes(command) || command === 'doctor') {
+      activeScanners.push(plugin);
+    }
+  }
+
+  for (const scanner of activeScanners) {
     try {
       const scannerFindings = await scanner.scan(context);
       for (const finding of scannerFindings) {

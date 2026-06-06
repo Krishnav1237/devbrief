@@ -45,6 +45,31 @@ describe('Vibe Shield Runtime Guard', () => {
     expect(fs.existsSync(outsideFile)).toBe(false);
   });
 
+  it('blocks fs writes outside workspace under ESM imports', async () => {
+    const scriptPath = path.join(tempDir, 'script.mjs');
+    const outsideFile = path.resolve(tempDir, '../outside-shield-write-esm-test.txt');
+    if (fs.existsSync(outsideFile)) fs.unlinkSync(outsideFile);
+
+    fs.writeFileSync(scriptPath, `
+      import fs from 'fs';
+      try {
+        fs.writeFileSync("${outsideFile.replace(/\\/g, '\\\\')}", "compromised");
+        process.exit(0);
+      } catch (err) {
+        process.exit(95);
+      }
+    `, 'utf-8');
+
+    const code = await shieldCommand(['node', scriptPath], {
+      path: tempDir,
+      dryRun: false,
+      verbose: false
+    });
+
+    expect(code).toBe(95);
+    expect(fs.existsSync(outsideFile)).toBe(false);
+  });
+
   it('allows fs writes inside workspace', async () => {
     const scriptPath = path.join(tempDir, 'script.cjs');
     const insideFile = path.join(tempDir, 'inside-shield-write-test.txt');

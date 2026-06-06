@@ -1,43 +1,55 @@
 # DevBrief
 
-**Project Maintenance Intelligence for developers.**
+**Project Maintenance Intelligence for Developers.**
 
-DevBrief is a local-first, zero-setup CLI that tells you what actually needs your attention in a project, what will break, and what you can safely ignore.
-
-```bash
-npx devbrief doctor
-```
-
-No configuration. No API keys. No SaaS account. Run it in any repository and get a calm maintenance report in seconds.
+DevBrief is a local-first, zero-setup CLI that analyzes your codebase imports and configuration files to tell you what actually needs your attention, what will break, and what you can safely ignore.
 
 ---
 
 ## What is DevBrief?
 
 **DevBrief sits between:**
+*   **Dependabot / Renovate** (which generate constant automated update noise)
+*   **Snyk / Trivy** (which dump massive, context-free vulnerability reports)
+*   **endoflife.date** (which lists raw runtime lifecycle timelines)
 
-- **Dependabot / Renovate** (which generate automated noise and PR spams)
-- **Snyk / Trivy** (which dump massive vulnerability reports)
-- **endoflife.date** (which lists raw lifecycle timelines)
+Instead of generating more alerts, DevBrief helps you decide what actually deserves attention today.
 
-Instead of generating more alerts, DevBrief answers:
-
-- **What matters?** (Which dependencies are actively used in code)
-- **What can wait?** (What risks are isolated or hidden behind dev dependencies)
-- **What will break?** (What upgrades cross major boundaries or affect import paths)
-- **What should I do next?** (The smallest, high-confidence maintenance step)
+![DevBrief Dashboard UI Mockup](docs/dashboard_screenshot.png)
 
 ---
 
-## Running Your First Scan
+## ⚡ The Hero Feature: Multi-Ecosystem Upgrade Confidence
 
-Run without installing:
+Every scanner can tell you when a package is out of date. DevBrief is different: it parses your imports in JavaScript/TypeScript, Python, Go, and Rust to check if upgrading a package will break your code.
+
+```bash
+npx devbrief upgrade express --target 5.0.0
+```
+
+```text
+UPGRADE WITH REVIEW: express
+Installed: 4.18.2
+Target: 5.0.0
+Effort: 20 min
+
+RISKY: express 4.18.2 -> 5.0.0 crosses a major version
+  Affected files: src/server.ts, src/api/users.ts
+  Decision: review, 20 min, confidence: High
+  Why this matters: Express 5 introduces breaking routing behaviors and changes query parser settings.
+
+Recommended action: Review routing handlers in the affected files and test endpoint behavior.
+```
+
+---
+
+## 🩺 The Flagship Workflow: Doctor Scan
+
+Run a fast, zero-configuration local scan on your repository:
 
 ```bash
 npx devbrief doctor
 ```
-
-### Example Report:
 
 ```text
 EOL: Node 20 is past EOL (2026-04-30)
@@ -68,73 +80,16 @@ Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
 
 ---
 
-## ⚡ The Killer Feature: Multi-Ecosystem Upgrade Confidence
-
-DevBrief parses your project imports to check if upgrading a package will break your code. It supports JavaScript/TypeScript, Python (PyPI), Rust (Crates.io), and Go (Go Proxy) ecosystems natively:
-
-```bash
-npx devbrief upgrade express --target 5.0.0
-```
-
-```text
-UPGRADE WITH REVIEW: express
-Installed: 4.18.2
-Target: 5.0.0
-Effort: 20 min
-
-RISKY: express 4.18.2 -> 5.0.0 crosses a major version
-  Affected files: src/server.ts, src/api/users.ts
-  Decision: review, 20 min, confidence: High
-  Why this matters: Express 5 introduces breaking routing behaviors and changes query parser settings.
-
-Recommended action: Review routing handlers in the affected files and test endpoint behavior.
-```
-
----
-
-## 🔒 Security & Vibe Coding Protections
-
-DevBrief provides targeted safeguards for vibe coders and AI-assisted workflows:
-
-- **Vibe Shield Runtime Sandbox (`devbrief shield -- <cmd>`):** Runs target commands under a dynamic execution guard. Intercepts and blocks filesystem modifications outside the workspace directory, blocks shell injections, restricts reading of sensitive directories (`~/.ssh`, `~/.aws`, `~/.kube`, `/etc/passwd`), and stops HTTP/HTTPS secrets leaks to untrusted domains. Supports Node.js and Python runtimes natively.
-- **Automated Secret Extraction (`devbrief clean-secrets`):** Finds hardcoded secrets and placeholders in your code, extracts them into local `.env` files, and automatically updates your file imports and references to load them from environment variables.
-- **Git Pre-commit Hook (`devbrief init-hook`):** Automatically registers a pre-commit hook that intercepts commits and runs `devbrief doctor --exit-code --quiet`. It blocks commits if critical vulnerabilities, configuration errors, or env drifts are found.
-- **Unignored `.env` Guard:** Checks if your local environment configuration files are unignored in `.gitignore` (using native `git check-ignore`), preventing accidental leaks of active API keys.
-- **AI-Generated Placeholder Detection:** Scans codebase for standard LLM placeholders (e.g. `YOUR_API_KEY_HERE`, `sk-proj-placeholder`) that indicate incomplete configuration.
-- **Environment Variable Drift:** Detects variables accessed in source files but undocumented in `.env.example` or unconfigured in local `.env` files.
-- **Phantom & Unused Dependency Auditing:** Scans source file imports to flag dependencies used but not declared in manifests, and declared dependencies that are never imported.
-
----
-
-## Scanner Maturity Levels
-
-DevBrief is transparent about what it can prove. We categorize our scans by maturity:
-
-### Stable
-- **Runtime Lifecycle**: Node.js and Python EOL checks (fetching dynamic timelines from [endoflife.date](https://endoflife.date) with local caching).
-- **Dependency Risk**: Dynamic auditing across npm, pnpm, yarn, and bun depending on lockfiles; major version gaps; native module rebuild risks.
-- **Upgrade Confidence**: Repository import cross-referencing and target version checks across **npm**, **PyPI**, **Crates.io**, and **Go Proxy** registries.
-- **Safe Remediation**: Automates low-risk package upgrades with a safeguard checking `git status --porcelain` before making local changes.
-
-### Beta
-- **Infrastructure Drift**: Floating image tags, old runners, and Compose configuration mismatches.
-- **Services Deprecation**: Deprecating vendor SDK versions (e.g. Stripe, OpenAI, Clerk, Twilio).
-
-### Experimental
-- **Operational Signals**: Missing local smoke checks, un-timed CI cron definitions, and backup schedules. (Cost and ops checks are hidden by default to preserve developer trust).
-
----
-
 ## Who It Is For
 
-- **Solo Developers & Indie Hackers** who don't have time to sort through 40 warning emails.
-- **Startup Engineers** looking for a zero-setup view of codebase tech debt.
-- **Open Source Maintainers** wanting to keep actions and base configurations clean.
-- **Small Teams** who want high-signal, actionable maintenance recommendations.
+*   **Solo developers** tired of sorting through automated update noise.
+*   **Open-source maintainers** who want to keep CI and base configurations clean.
+*   **Startup teams** seeking a zero-setup view of code and runtime technical debt.
+*   **Developers** who value high-signal, actionable maintenance decisions.
 
 ---
 
-## CLI Commands
+## CLI Commands Reference
 
 All primary and secondary commands support formatting options (e.g. for CI/CD integrations) via the `--format` flag:
 *   `--format text` (Default CLI output)
@@ -143,40 +98,40 @@ All primary and secondary commands support formatting options (e.g. for CI/CD in
 *   `--format quiet` (No console output, sets correct exit codes)
 
 ### Primary Commands
-- `npx devbrief doctor` — Full maintenance radar (scans all categories).
-- `npx devbrief upgrade <package>` — Evaluates if a dependency upgrade is safe for this project (supporting npm, PyPI, Crates.io, and Go Proxy).
-- `npx devbrief runtime` — Checks runtime EOL state (alias: `node-upgrade`).
-- `npx devbrief inbox` — Lists only urgent items and quick safe wins.
+*   `npx devbrief doctor` — Runs the smart maintenance radar and shows what needs attention first.
+*   `npx devbrief upgrade <package>` — Advise whether a dependency upgrade is safe for this project.
+*   `npx devbrief runtime` — Checks runtime EOL lifecycle state (alias: `node-upgrade`).
+*   `npx devbrief inbox` — Lists only urgent items and quick safe wins.
 
 ### Secondary Commands
-- `npx devbrief risk` — Scan dependency vulnerabilities and lifecycle risks.
-- `npx devbrief infra` — Check Docker, Compose, and CI runner configurations.
-- `npx devbrief security` — Check security posture (committed `.env`, wildcard CORS, debug flags).
-- `npx devbrief services` — Detect drift in third-party API SDKs.
-- `npx devbrief weekly` — Builds a compact weekly plan.
-- `npx devbrief fix --safe-only` — Automatically applies low-risk, high-confidence minor and patch dependency updates (requires a clean git working directory, checked via `git status --porcelain`).
-- `npx devbrief clean-secrets` — Scans files for hardcoded secrets, extracts them to `.env`, and updates code references.
-- `npx devbrief shield -- <cmd>` — Runs a command under dynamic runtime sandbox protection (intercepts filesystem writes/reads, shell injections, and network leaks).
-- `npx devbrief init-hook` — Installs a Git pre-commit hook that runs automated scans on every commit, blocking commits with critical vulnerabilities.
+*   `npx devbrief risk` — Scan dependency and vulnerability risk.
+*   `npx devbrief infra` — Check Docker, Compose, and CI runner configurations.
+*   `npx devbrief security` — Check security posture (committed `.env`, wildcard CORS, debug flags).
+*   `npx devbrief services` — Detect drift in third-party API SDKs.
+*   `npx devbrief weekly` — Builds a compact weekly maintenance plan.
+*   `npx devbrief fix` — Applies conservative maintenance fixes (interactive menu in TTY; or `--safe-only`).
+*   `npx devbrief clean-secrets` — Extract hardcoded secrets and placeholders into `.env` and update imports.
+*   `npx devbrief shield -- <cmd>` — **[Optional / Advanced]** Run a command under DevBrief runtime sandbox protection.
+*   `npx devbrief init-hook` — Install a Git pre-commit hook to run scans automatically.
 
 ---
 
 ## Trust Model
 
-- **Local First**: Scans and evaluates entirely on your machine.
-- **Calm & Conservative**: Low-signal or speculative alerts are hidden by default.
-- **Zero Configuration**: Works without API keys, environment files, or dashboards.
-- **Resilient**: Degrades gracefully when network services (e.g. `npm audit`) are offline.
+*   **Local First:** Scans and evaluates entirely on your machine.
+*   **Calm & Conservative:** Low-signal or speculative alerts are hidden by default.
+*   **Zero Configuration:** Works without API keys, environment files, or SaaS accounts.
+*   **Resilient:** Degrades gracefully when network registries or API endpoints are offline.
 
 ---
 
 ## Documentation Links
 
-- [docs/RISK_GUIDE.md](docs/RISK_GUIDE.md) — Scoring, confidence levels, and risk definitions.
-- [docs/EXAMPLES.md](docs/EXAMPLES.md) — Raw CLI outputs for all commands.
-- [docs/CONFIG.md](docs/CONFIG.md) — Local port and database locations.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — How the engine parses files and handles monorepos.
-- [docs/LEGACY.md](docs/LEGACY.md) — Legacy release briefing and TTS documentation.
+*   [docs/RISK_GUIDE.md](docs/RISK_GUIDE.md) — Scoring, confidence levels, and maturity categories.
+*   [docs/SHIELD.md](docs/SHIELD.md) — Vibe Shield runtime sandboxing, command blocking, and preloaders.
+*   [docs/CONFIG.md](docs/CONFIG.md) — Port overrides, registry offline environment configurations, and file layout.
+*   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Execution blocks, static scanner types, and project context loader.
+*   [docs/EXAMPLES.md](docs/EXAMPLES.md) — Sample console outputs for every subcommand.
 
 ---
 
@@ -188,4 +143,4 @@ We welcome small, evidence-backed improvements. Please read [CONTRIBUTING.md](CO
 
 ## Legacy Compatibility
 
-For backwards compatibility, the legacy release briefing pipeline remains available. Commands (`devbrief run` and `devbrief stack`) and API integrations are fully isolated. See [docs/LEGACY.md](docs/LEGACY.md) for details.
+For backwards compatibility, the legacy release briefing pipeline remains available. Commands (`devbrief run` and `devbrief stack`) and database schemas are fully isolated. See [docs/LEGACY.md](docs/LEGACY.md) for details.

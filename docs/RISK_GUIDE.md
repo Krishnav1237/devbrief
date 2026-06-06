@@ -1,6 +1,6 @@
-# DevBrief Risk Guide
+# DevBrief Risk & Maturity Guide
 
-DevBrief maps automated scan findings to human-centric risk labels and maintenance decisions.
+DevBrief maps automated scan findings to human-centric risk labels, recommendation actions, and project health scores.
 
 ---
 
@@ -8,12 +8,12 @@ DevBrief maps automated scan findings to human-centric risk labels and maintenan
 
 | Label | Meaning | Recommended Action |
 |---|---|---|
-| `SAFE` | No current action needed | Ignore |
-| `REVIEW` | Check context before changing code | Review or monitor |
-| `UPGRADE SOON` | Plan a low/medium urgency update | Upgrade during standard cycles |
-| `RISKY` | Real breakage or production bugs are plausible | Review before code changes |
-| `EOL` | Runtime support has ended; security alerts are dead | Upgrade or migrate |
-| `ACTION REQUIRED` | Direct security vulnerability or production failure | Remediate immediately |
+| `SAFE` | No current action needed | Ignore or monitor |
+| `REVIEW` | Check code/configuration context before changing code | Review manually |
+| `UPGRADE SOON` | Plan a low/medium urgency version update | Upgrade during regular maintenance |
+| `RISKY` | Plausible production bugs, regressions, or vulnerability exposures | Review and plan mitigation |
+| `EOL` | Runtime or version support has ended; security updates are no longer shipped | Upgrade immediately |
+| `ACTION REQUIRED` | Direct security vulnerability or severe configuration error | Remediate immediately |
 
 ---
 
@@ -21,37 +21,62 @@ DevBrief maps automated scan findings to human-centric risk labels and maintenan
 
 Every finding returns a clear `recommendation`:
 
-- `ignore` — Informational only. No action needed.
-- `monitor` — Watch for deprecation dates or drift without acting today.
-- `review` — Code inspection is needed to evaluate impact.
-- `upgrade` — Apply a package or runtime version bump.
-- `migrate` — Involves major version adaptations or API changes.
-- `remediate` — Simple file fixes (e.g. remove committed `.env` files).
+*   `ignore` — Informational only. No action is required.
+*   `monitor` — Watch for upcoming deprecation dates or drift without taking action today.
+*   `review` — Static code inspection or manual verification is required.
+*   `upgrade` — Apply a package or runtime version bump.
+*   `migrate` — Requires structural adaptations, import changes, or API updates.
+*   `remediate` — Simple file fixes (e.g. removing unignored `.env` files or extracting hardcoded credentials).
 
 ---
 
 ## Qualitative Confidence Mappings
 
-To avoid arbitrary numbering that developers cannot verify, DevBrief formats confidence levels as qualitative groupings:
+To avoid arbitrary numbering that developers cannot verify, DevBrief categories confidence levels qualitatively:
 
-- **High**: The engine has direct, definitive proof of the risk (e.g., matching a locked package name to an active CVE identifier, or parsing an expired official EOL date).
-- **Medium**: Strong heuristic signals are present, but local project configuration or source code context should be reviewed to confirm actionability.
-- **Low**: Speculative findings (e.g. general code weights, missing local testing scripts). These are marked `hiddenByDefault: true` and never surfaced in standard outputs.
+*   **High:** The engine has direct, definitive proof of the risk (e.g., matching a locked package name to an active CVE identifier, or parsing an expired runtime EOL date).
+*   **Medium:** Strong heuristic signals are present, but local project configuration or source code context should be reviewed to confirm actionability.
+*   **Low:** Speculative findings. These are marked `hiddenByDefault: true` and are never surfaced in standard outputs to avoid alert fatigue.
 
 ---
 
-## Health Score & Categories
+## Scanner Maturity Levels
 
-Health scores (0–100) are compiled by deducting weighted penalties from a perfect 100 base score. This score is split into four user-centric categories:
+DevBrief is transparent about what it can prove. We categorize our scans by maturity:
 
-### 1. Runtime Lifecycle (Max 25 pts)
-Scans Node.js, Python, and Docker runtimes for active lifecycle state and EOL deadlines.
+### 🟢 Stable
+Scanners that operate with minimal false positives and provide deterministic actionability:
+*   **Runtime Lifecycle:** Checks Node.js and Python runtimes against official EOL timelines.
+*   **Dependency Risk:** Audits package manifests for major version gaps and deprecated dependencies.
+*   **Vulnerability Detection:** Integrates with local lockfile auditing tools to resolve active CVEs.
+*   **Upgrade Confidence:** Evaluates target package version changes against your repository imports to check for affected entry points.
+*   **Security Posture:** Checks for unignored `.env` files, weak JWT tokens, and exposed credentials.
 
-### 2. Dependency Risk (Max 25 pts)
-Scans package locks and manifests for vulnerabilities, outdated majors, and deprecated libraries.
+### 🟡 Beta
+Scanners that are highly useful but may require context checks:
+*   **Infrastructure Drift:** Detects outdated Docker base images, Docker Compose versions, and GitHub Actions runner configurations.
+*   **Service Deprecation:** Identifies old vendor SDK integrations (e.g., Stripe, OpenAI) that are nearing API deprecation.
+*   **Vibe Coding Safety:** Analyzes undocumented environment variables (drift between `.env` and `.env.example`), phantom dependencies (imported but not declared), and unused dependencies.
 
-### 3. Infrastructure (Max 25 pts)
-Checks Docker files, compose setups, and GitHub Action runners for tag drift or outdated base specs.
+### 🔴 Experimental
+Scanners targeting edge-case operational issues:
+*   **Operational Signals:** Checks for missing local smoke tests, untimed CI crons, and backup schedules. (Operational findings are hidden by default).
 
-### 4. Security & Services (Max 25 pts)
-Scans for exposed secrets, wildcard CORS parameters, and deprecated API SDK integrations (e.g., Stripe, OpenAI).
+---
+
+## Trust Model
+
+*   **Local First:** All scans, parser operations, and dependency reviews run entirely on your local machine. No code is transmitted to external servers.
+*   **Calm & Conservative:** Speculative or low-signal alerts are filtered out by default to preserve developer focus.
+*   **Zero Configuration:** Designed to work out of the box without requiring API keys, SaaS accounts, or config files.
+*   **Resilient:** Degrades gracefully when network registries (e.g. npm or endoflife.date) are offline, falling back to local database caches.
+
+---
+
+## ⚠️ Security of Plugins
+
+> [!WARNING]
+> Custom scanner plugins execute local code inside the DevBrief engine process.
+> *   Only load custom scanner plugins from trusted sources.
+> *   Do not download or run unverified plugins.
+> *   Place project-specific plugins in the local `.devbrief/plugins/` folder only after conducting a code review.
