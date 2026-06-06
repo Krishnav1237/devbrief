@@ -125,3 +125,71 @@ Urgent:
 Safe wins:
   (none — no low-effort, safe actions available)
 ```
+
+---
+
+## 5. Safe Fixes (`devbrief fix --safe-only`)
+
+Applying automated fixes for high-confidence, low-risk upgrades across multiple languages and workspace folders:
+
+```bash
+npx devbrief fix --safe-only
+```
+
+```text
+Upgrading package: lodash using npm in .
+added 1 package in 1s
+Upgrading package: axios using pnpm in apps/web
+added 1 package in 1s
+Upgrading Rust crate: serde in packages/rust-lib
+cargo add serde
+Upgrading Python package: requests in packages/py-app
+Rewrote packages/py-app/requirements.txt to set requests==2.32.3
+
+SUCCESS: Processed 4 safe fixes.
+Modified packages: lodash (npm), axios (pnpm), serde (cargo), requests (pip)
+Files changed: package.json, apps/web/package.json, packages/rust-lib/Cargo.toml, packages/py-app/requirements.txt
+```
+
+---
+
+## 6. CI/CD Collapsible Summary (`--format markdown`)
+
+Generating structured markdown summaries for CI/CD platforms (e.g. GitHub Actions summaries):
+
+```bash
+npx devbrief doctor --format markdown
+```
+
+```markdown
+# DevBrief Project Maintenance Report
+
+**Health Score:** 72 / 100
+
+Category | Score
+---|---
+Runtime Lifecycle | 15 / 25
+Dependency Risk | 22 / 25
+Infrastructure | 20 / 25
+Security & Services | 15 / 25
+
+## Findings
+
+<details>
+<summary><b>EOL: Node 20 is past EOL (2026-04-30)</b> [package.json]</summary>
+
+- **Decision:** upgrade, 1 hour+, confidence: High
+- **Files:** package.json
+- **Evidence:** smallest safe path: Node 22 or 24 LTS
+- **Why this matters:** Security fixes and performance improvements no longer ship for EOL runtimes.
+</details>
+
+<details>
+<summary><b>REVIEW: CORS origin is configured as wildcard</b> [src/server.ts]</summary>
+
+- **Decision:** review, 20 min, confidence: Medium
+- **Files:** src/server.ts
+- **Evidence:** CORS origin is '*'
+- **Why this matters:** Permissive wildcards allow cross-origin requests from arbitrary websites.
+</details>
+```

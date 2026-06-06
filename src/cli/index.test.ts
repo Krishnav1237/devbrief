@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import type { StackConfiguration } from '../models/index.js';
 
 // Mock config-io before importing the module under test
@@ -10,7 +12,34 @@ vi.mock('../utils/config-io.js', () => ({
   saveStackConfig: (...args: unknown[]) => mockSaveStackConfig(...(args as [StackConfiguration])),
 }));
 
-const { stackAdd, stackRemove, stackList } = await import('./index.js');
+const mockRunMaintenanceScan = vi.fn();
+vi.mock('../maintenance/engine.js', () => ({
+  runMaintenanceScan: (...args: any[]) => mockRunMaintenanceScan(...args),
+}));
+
+const mockExec = vi.fn();
+let mockGitStatusStdout = '';
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    exec: (...args: any[]) => {
+      const cmd = args[0];
+      mockExec(...args);
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') {
+        if (cmd === 'git status --porcelain') {
+          cb(null, { stdout: mockGitStatusStdout });
+        } else {
+          cb(null, { stdout: 'Mocked upgrade output' });
+        }
+      }
+    }
+  };
+});
+
+const { stackAdd, stackRemove, stackList, fixCommand } = await import('./index.js');
 
 describe('stackAdd', () => {
   beforeEach(() => {
@@ -245,5 +274,215 @@ describe('stackList', () => {
     const reactUrlStart = reactLine!.indexOf('https://react-url.com');
     const longUrlStart = longLine!.indexOf('https://long-url.com');
     expect(reactUrlStart).toBe(longUrlStart);
+  });
+});
+
+describe('fixCommand', () => {
+  const tempDir = path.resolve(process.cwd(), 'temp-fix-test');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGitStatusStdout = '';
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('requires safeOnly option to run', async () => {
+    const res = await fixCommand({ path: tempDir });
+    expect(res).toContain('REVIEW: use `devbrief fix --safe-only`');
+  });
+
+  it('handles empty safe fixes gracefully', async () => {
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [],
+    });
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('SAFE: no high-confidence automatic fix found');
+  });
+
+  it('executes safe fixes correctly for npm projects', async () => {
+    // Write package.json and package-lock.json to mock npm project
+    fs.writeFileSync(path.join(tempDir, 'package.json'), '{}', 'utf-8');
+    fs.writeFileSync(path.join(tempDir, 'package-lock.json'), '{}', 'utf-8');
+
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:lodash',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'lodash vuln',
+          summary: 'lodash vuln',
+          recommendation: 'remediate',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'lodash',
+          files: ['package.json'],
+        },
+      ],
+    });
+
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('Upgrading package: lodash using npm in .');
+    expect(res).toContain('SUCCESS: Processed 1 safe fixes');
+    expect(res).toContain('Modified packages: lodash (npm)');
+    expect(res).toContain('Files changed: package.json');
+
+    expect(mockExec).toHaveBeenCalled();
+  });
+
+  it('handles monorepo workspaces and executes updates in package subdirectories', async () => {
+    const subAppDir = path.join(tempDir, 'apps', 'web');
+    fs.mkdirSync(subAppDir, { recursive: true });
+    fs.writeFileSync(path.join(subAppDir, 'package.json'), '{}', 'utf-8');
+    fs.writeFileSync(path.join(subAppDir, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0', 'utf-8');
+
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:axios',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'axios vuln',
+          summary: 'axios vuln',
+          recommendation: 'upgrade',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'axios',
+          files: ['apps/web/package.json'],
+        },
+      ],
+    });
+
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('Upgrading package: axios using pnpm in apps/web');
+    expect(res).toContain('SUCCESS: Processed 1 safe fixes');
+    expect(res).toContain('Modified packages: axios (pnpm)');
+    expect(res).toContain('Files changed: apps/web/package.json');
+
+    expect(mockExec).toHaveBeenCalled();
+  });
+
+  it('supports Rust (cargo) workspace safe fixes', async () => {
+    const rustDir = path.join(tempDir, 'packages', 'rust-lib');
+    fs.mkdirSync(rustDir, { recursive: true });
+    fs.writeFileSync(path.join(rustDir, 'Cargo.toml'), '[package]', 'utf-8');
+
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:serde',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'serde vuln',
+          summary: 'serde vuln',
+          recommendation: 'upgrade',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'serde',
+          files: ['packages/rust-lib/Cargo.toml'],
+        },
+      ],
+    });
+
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('Upgrading Rust crate: serde in packages/rust-lib');
+    expect(res).toContain('SUCCESS: Processed 1 safe fixes');
+    expect(res).toContain('Modified packages: serde (cargo)');
+    expect(res).toContain('Files changed: packages/rust-lib/Cargo.toml');
+  });
+
+  it('supports Go modules workspace safe fixes', async () => {
+    const goDir = path.join(tempDir, 'packages', 'go-lib');
+    fs.mkdirSync(goDir, { recursive: true });
+    fs.writeFileSync(path.join(goDir, 'go.mod'), 'module go-lib', 'utf-8');
+
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:uuid',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'uuid vuln',
+          summary: 'uuid vuln',
+          recommendation: 'upgrade',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'github.com/google/uuid',
+          files: ['packages/go-lib/go.mod'],
+        },
+      ],
+    });
+
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('Upgrading Go module: github.com/google/uuid in packages/go-lib');
+    expect(res).toContain('SUCCESS: Processed 1 safe fixes');
+    expect(res).toContain('Modified packages: github.com/google/uuid (go)');
+    expect(res).toContain('Files changed: packages/go-lib/go.mod');
+  });
+
+  it('supports Python (pip) requirements rewriting safe fixes', async () => {
+    const pythonDir = path.join(tempDir, 'packages', 'py-app');
+    fs.mkdirSync(pythonDir, { recursive: true });
+    fs.writeFileSync(path.join(pythonDir, 'requirements.txt'), 'requests==2.31.0\n', 'utf-8');
+
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:requests',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'requests vuln',
+          summary: 'requests vuln',
+          recommendation: 'upgrade',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'requests',
+          files: ['packages/py-app/requirements.txt'],
+        },
+      ],
+    });
+
+    const registryClient = await import('../utils/registry-client.js');
+    const registrySpy = vi.spyOn(registryClient, 'fetchWithRegistryClient');
+    registrySpy.mockResolvedValue({ info: { version: '2.32.3' } });
+
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('Upgrading Python package: requests in packages/py-app');
+    expect(res).toContain('Rewrote packages/py-app/requirements.txt to set requests==2.32.3');
+    expect(res).toContain('SUCCESS: Processed 1 safe fixes');
+    expect(res).toContain('Modified packages: requests (pip)');
+    expect(res).toContain('Files changed: packages/py-app/requirements.txt');
+
+    const updatedManifest = fs.readFileSync(path.join(pythonDir, 'requirements.txt'), 'utf-8');
+    expect(updatedManifest).toContain('requests==2.32.3');
+
+    registrySpy.mockRestore();
+  });
+
+  it('aborts and warns if there are uncommitted changes in the repository', async () => {
+    mockGitStatusStdout = 'M package.json'; // simulate modified file
+    const res = await fixCommand({ path: tempDir, safeOnly: true });
+    expect(res).toContain('REVIEW: Uncommitted changes detected in repository.');
+    expect(res).toContain('Please commit or stash your work');
+    expect(mockRunMaintenanceScan).not.toHaveBeenCalled();
   });
 });

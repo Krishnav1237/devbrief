@@ -2,13 +2,20 @@
 
 import { Command } from 'commander';
 import dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { loadStackConfig, saveStackConfig } from '../utils/config-io.js';
 import type { StackConfiguration, StackLibrary } from '../models/index.js';
 import { validateEnvVars } from './env-validation.js';
 import { runPipeline } from './run-pipeline.js';
 import { runMaintenanceScan } from '../maintenance/engine.js';
-import { formatInboxResult, formatQuietScanResult, formatScanResult, formatUpgradeRecommendation, formatWeeklyResult, scanExitCode } from '../maintenance/output.js';
+import { formatInboxResult, formatQuietScanResult, formatScanResult, formatUpgradeRecommendation, formatWeeklyResult, scanExitCode, formatMarkdownResult } from '../maintenance/output.js';
 import { adviseUpgrade } from '../maintenance/upgrade-advisor.js';
+import { fetchWithRegistryClient } from '../utils/registry-client.js';
+
+const execAsync = promisify(exec);
 
 interface ScanCommandOptions {
   path?: string;
@@ -16,6 +23,7 @@ interface ScanCommandOptions {
   json?: boolean;
   quiet?: boolean;
   exitCode?: boolean;
+  format?: 'text' | 'markdown' | 'json' | 'quiet';
 }
 
 interface UpgradeCommandOptions {
@@ -170,10 +178,14 @@ async function printScanCommand(
   options: ScanCommandOptions,
 ): Promise<void> {
   const result = await runMaintenanceScan(command, options.path);
-  if (options.json) {
+  const format = options.format || (options.json ? 'json' : options.quiet ? 'quiet' : 'text');
+  
+  if (format === 'json') {
     console.log(JSON.stringify(result, null, 2));
-  } else if (options.quiet) {
+  } else if (format === 'quiet') {
     console.log(formatQuietScanResult(result));
+  } else if (format === 'markdown') {
+    console.log(formatMarkdownResult(result));
   } else {
     console.log(formatScanResult(result, { expanded: options.expanded }));
   }
@@ -227,16 +239,69 @@ export async function weeklyCommand(options?: { path?: string }): Promise<string
   return formatWeeklyResult(result);
 }
 
+function detectPackageManager(dir: string, rootDir: string): 'npm' | 'pnpm' | 'yarn' | 'bun' {
+  let current = dir;
+  while (true) {
+    if (fs.existsSync(path.join(current, 'pnpm-lock.yaml'))) return 'pnpm';
+    if (fs.existsSync(path.join(current, 'yarn.lock'))) return 'yarn';
+    if (fs.existsSync(path.join(current, 'bun.lockb'))) return 'bun';
+    if (fs.existsSync(path.join(current, 'package-lock.json'))) return 'npm';
+    if (current === rootDir || current === path.dirname(current)) break;
+    current = path.dirname(current);
+  }
+  return 'npm'; // Default
+}
+
+async function fixPythonDependency(manifestPath: string, pkg: string): Promise<string | null> {
+  const data = await fetchWithRegistryClient<any>(`https://pypi.org/pypi/${pkg}/json`);
+  const latest = data?.info?.version;
+  if (!latest) return null;
+
+  if (fs.existsSync(manifestPath)) {
+    let content = fs.readFileSync(manifestPath, 'utf-8');
+    const regex = new RegExp(`^(${pkg})([<>=!~]=?.*)$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `$1==${latest}`);
+      fs.writeFileSync(manifestPath, content, 'utf-8');
+      return latest;
+    }
+  }
+  return null;
+}
+
 export async function fixCommand(options?: { path?: string; safeOnly?: boolean }): Promise<string> {
   if (!options?.safeOnly) {
     return 'REVIEW: use `devbrief fix --safe-only` so risky upgrades are never applied silently';
   }
 
-  const result = await runMaintenanceScan('doctor', options.path);
+  const projectPath = options.path ? path.resolve(options.path) : process.cwd();
+
+  // Check if git directory has uncommitted changes
+  try {
+    const { stdout } = await execAsync('git status --porcelain', { cwd: projectPath });
+    if (stdout.trim().length > 0) {
+      return [
+        'REVIEW: Uncommitted changes detected in repository.',
+        'Please commit or stash your work before running the fix command.',
+      ].join('\n');
+    }
+  } catch (err: any) {
+    const isGitRepoError = err.message && (
+      err.message.includes('not a git repository') ||
+      err.message.includes('ENOENT') ||
+      err.message.includes('command not found')
+    );
+    if (!isGitRepoError) {
+      return `Error checking git repository status: ${err.message}`;
+    }
+  }
+
+  const result = await runMaintenanceScan('doctor', projectPath);
   const safeFixes = result.findings.filter((finding) =>
-    finding.recommendation === 'remediate'
+    (finding.recommendation === 'remediate' || finding.recommendation === 'upgrade')
     && finding.confidence >= 8
-    && finding.effort === '5 min',
+    && finding.effort === '5 min'
+    && finding.packageName
   );
 
   if (safeFixes.length === 0) {
@@ -247,11 +312,103 @@ export async function fixCommand(options?: { path?: string; safeOnly?: boolean }
     ].join('\n');
   }
 
-  return [
-    'REVIEW: safe fixes are identified but not auto-applied yet',
-    ...safeFixes.map((finding) => `${finding.label}: ${finding.summary}`),
-    'No files changed.',
-  ].join('\n');
+  const lines: string[] = [];
+  const updatedPackages: string[] = [];
+  const modifiedFiles = new Set<string>();
+
+  for (const fix of safeFixes) {
+    const pkg = fix.packageName!;
+    
+    // Resolve which manifest defines this dependency
+    const manifestFile = fix.files?.find((file) =>
+      file.endsWith('package.json') ||
+      file.endsWith('Cargo.toml') ||
+      file.endsWith('go.mod') ||
+      file.endsWith('requirements.txt')
+    );
+
+    const relativeManifestPath = manifestFile || 'package.json';
+    const absoluteManifestPath = path.join(projectPath, relativeManifestPath);
+    const manifestDir = path.dirname(absoluteManifestPath);
+
+    if (relativeManifestPath.endsWith('package.json')) {
+      const pkgManager = detectPackageManager(manifestDir, projectPath);
+      
+      lines.push(`Upgrading package: ${pkg} using ${pkgManager} in ${path.relative(projectPath, manifestDir) || '.'}...`);
+      
+      let cmd = '';
+      if (pkgManager === 'npm') {
+        cmd = `npm install ${pkg}@latest --no-audit`;
+      } else if (pkgManager === 'pnpm') {
+        cmd = `pnpm add ${pkg}@latest`;
+      } else if (pkgManager === 'yarn') {
+        cmd = `yarn add ${pkg}@latest`;
+      } else if (pkgManager === 'bun') {
+        cmd = `bun add ${pkg}@latest`;
+      }
+
+      try {
+        const { stdout } = await execAsync(cmd, { cwd: manifestDir });
+        if (stdout.trim()) lines.push(stdout.trim());
+        updatedPackages.push(`${pkg} (${pkgManager})`);
+        modifiedFiles.add(relativeManifestPath);
+      } catch (err: any) {
+        lines.push(`Failed to upgrade ${pkg} in ${manifestDir}: ${err.message}`);
+      }
+    } else if (relativeManifestPath.endsWith('Cargo.toml')) {
+      lines.push(`Upgrading Rust crate: ${pkg} in ${path.relative(projectPath, manifestDir) || '.'}...`);
+      try {
+        const { stdout } = await execAsync(`cargo add ${pkg}`, { cwd: manifestDir });
+        if (stdout.trim()) lines.push(stdout.trim());
+        updatedPackages.push(`${pkg} (cargo)`);
+        modifiedFiles.add(relativeManifestPath);
+      } catch (err: any) {
+        lines.push(`Failed to upgrade Rust crate ${pkg} in ${manifestDir}: ${err.message}`);
+      }
+    } else if (relativeManifestPath.endsWith('go.mod')) {
+      lines.push(`Upgrading Go module: ${pkg} in ${path.relative(projectPath, manifestDir) || '.'}...`);
+      try {
+        const { stdout } = await execAsync(`go get ${pkg}@latest`, { cwd: manifestDir });
+        if (stdout.trim()) lines.push(stdout.trim());
+        updatedPackages.push(`${pkg} (go)`);
+        modifiedFiles.add(relativeManifestPath);
+      } catch (err: any) {
+        lines.push(`Failed to upgrade Go module ${pkg} in ${manifestDir}: ${err.message}`);
+      }
+    } else if (relativeManifestPath.endsWith('requirements.txt')) {
+      lines.push(`Upgrading Python package: ${pkg} in ${path.relative(projectPath, manifestDir) || '.'}...`);
+      try {
+        const targetVersion = await fixPythonDependency(absoluteManifestPath, pkg);
+        if (targetVersion) {
+          lines.push(`Rewrote ${relativeManifestPath} to set ${pkg}==${targetVersion}`);
+          
+          // Try to run pip install locally if user has it installed
+          try {
+            await execAsync(`pip install ${pkg}==${targetVersion}`, { cwd: manifestDir });
+          } catch {
+            // Ignore if local pip environment setup is not present
+          }
+          
+          updatedPackages.push(`${pkg} (pip)`);
+          modifiedFiles.add(relativeManifestPath);
+        } else {
+          lines.push(`Could not resolve latest version for Python package ${pkg}`);
+        }
+      } catch (err: any) {
+        lines.push(`Failed to upgrade Python package ${pkg} in ${manifestDir}: ${err.message}`);
+      }
+    }
+  }
+
+  lines.push(`\nSUCCESS: Processed ${safeFixes.length} safe fixes.`);
+  if (updatedPackages.length > 0) {
+    lines.push(`Modified packages: ${updatedPackages.join(', ')}`);
+    lines.push(`Files changed: ${[...modifiedFiles].join(', ')}`);
+  } else {
+    lines.push('No packages were modified successfully.');
+  }
+
+  return lines.join('\n');
 }
 
 // Helper wrapper to handle async action rejections
@@ -330,6 +487,7 @@ export function createProgram(): Command {
     .option('--json', 'Print machine-readable JSON')
     .option('--quiet', 'Print only summary, health, and next action')
     .option('--exit-code', 'Use automation exit codes: 0 safe, 1 review, 2 risky')
+    .option('--format <format>', 'Output format: text, markdown, json, quiet')
     .addHelpText('after', `
 Examples:
   $ devbrief doctor
@@ -349,6 +507,7 @@ Examples:
     .option('--json', 'Print machine-readable JSON')
     .option('--quiet', 'Print only summary, health, and next action')
     .option('--exit-code', 'Use automation exit codes: 0 safe, 1 review, 2 risky')
+    .option('--format <format>', 'Output format: text, markdown, json, quiet')
     .action(runAction(async (options: ScanCommandOptions) => {
       await printScanCommand('risk', options);
     }));
@@ -381,6 +540,7 @@ Examples:
       .option('--json', 'Print machine-readable JSON')
       .option('--quiet', 'Print only summary, health, and next action')
       .option('--exit-code', 'Use automation exit codes: 0 safe, 1 review, 2 risky')
+      .option('--format <format>', 'Output format: text, markdown, json, quiet')
       .action(runAction(async (options: ScanCommandOptions) => {
         await printScanCommand(command, options);
       }));
@@ -394,6 +554,7 @@ Examples:
     .option('--json', 'Print machine-readable JSON')
     .option('--quiet', 'Print only summary, health, and next action')
     .option('--exit-code', 'Use automation exit codes: 0 safe, 1 review, 2 risky')
+    .option('--format <format>', 'Output format: text, markdown, json, quiet')
     .action(runAction(async (options: ScanCommandOptions) => {
       await printScanCommand('runtime', options);
     }));

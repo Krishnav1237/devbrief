@@ -73,6 +73,17 @@ Every scanner finding must return:
 
 Speculative or low-confidence findings must be set to `hiddenByDefault: true` so they do not clutter standard reports or lower the health score unnecessarily.
 
+### Resilient Network Requests
+If your scanner needs to fetch remote resources (e.g. library registry metrics or deprecation API timelines), **do not use `axios` directly**. Instead, import and use the throttled, cached registry client helper:
+
+```ts
+import { fetchWithRegistryClient } from '../utils/registry-client.js';
+
+const data = await fetchWithRegistryClient<MyResponseSchema>(url, { timeout: 5000 });
+```
+
+This guarantees your scanner respects the offline flag (`DEVBRIEF_OFFLINE=1`), concurrency throttling, local file caching, and retry logic.
+
 ---
 
 ## Submitting Pull Requests

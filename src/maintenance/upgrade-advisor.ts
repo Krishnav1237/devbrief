@@ -4,26 +4,64 @@ import { findPackageUsage } from './impact-analysis.js';
 import { loadProjectContext } from './project-context.js';
 import type { MaintenanceFinding } from './types.js';
 import { compareVersions, majorOf, stripVersionRange } from './version-utils.js';
+import { fetchWithRegistryClient } from '../utils/registry-client.js';
 
 const execFileAsync = promisify(execFile);
 
-async function fetchLatestVersion(packageName: string, projectPath: string): Promise<string | undefined> {
-  if (process.env.DEVBRIEF_SKIP_NPM_VIEW === '1') return undefined;
+function escapeGoModulePath(path: string): string {
+  return path.replace(/[A-Z]/g, (match) => '!' + match.toLowerCase());
+}
 
-  // Validate package name to prevent npm argument injection
-  if (!packageName || typeof packageName !== 'string' || !/^(?:@[a-z0-9-*~][a-z0-9-*._~]*\/)?[a-z0-9-*~][a-z0-9-*._~]*$/i.test(packageName)) {
-    return undefined;
-  }
+async function fetchLatestVersion(packageName: string, ecosystem: string, projectPath: string): Promise<string | undefined> {
+  // Validate package name
+  if (!packageName || typeof packageName !== 'string') return undefined;
 
   try {
-    const { stdout } = await execFileAsync('npm', ['view', packageName, 'version'], {
-      cwd: projectPath,
-      timeout: 8000,
-    });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
+    if (ecosystem === 'JavaScript/TypeScript' || ecosystem === 'Unknown') {
+      if (!/^(?:@[a-z0-9-*~][a-z0-9-*._~]*\/)?[a-z0-9-*~][a-z0-9-*._~]*$/i.test(packageName)) {
+        return undefined;
+      }
+      try {
+        const data = await fetchWithRegistryClient<any>(`https://registry.npmjs.org/${packageName}/latest`, { timeout: 5000 });
+        if (data && data.version) {
+          return data.version;
+        }
+      } catch {
+        // Fall back below
+      }
+
+      if (process.env.DEVBRIEF_SKIP_NPM_VIEW === '1') return undefined;
+      // Fallback to npm view CLI if registry call fails
+      const { stdout } = await execFileAsync('npm', ['view', packageName, 'version'], {
+        cwd: projectPath,
+        timeout: 8000,
+      });
+      return stdout.trim() || undefined;
+    } else if (ecosystem === 'Python') {
+      const data = await fetchWithRegistryClient<any>(`https://pypi.org/pypi/${packageName}/json`, { timeout: 5000 });
+      if (data && data.info && data.info.version) {
+        return data.info.version;
+      }
+    } else if (ecosystem === 'Rust') {
+      const data = await fetchWithRegistryClient<any>(`https://crates.io/api/v1/crates/${packageName}`, {
+        headers: { 'User-Agent': 'DevBrief/1.0 (contact@devbrief.com)' },
+        timeout: 5000,
+      });
+      if (data && data.crate) {
+        return data.crate.max_stable_version || data.crate.max_version;
+      }
+    } else if (ecosystem === 'Go') {
+      const escapedPath = escapeGoModulePath(packageName);
+      const data = await fetchWithRegistryClient<any>(`https://proxy.golang.org/${escapedPath}/@latest`, { timeout: 5000 });
+      if (data && data.Version) {
+        return data.Version.replace(/^v/, '');
+      }
+    }
+  } catch (err: any) {
+    console.warn(`Failed to fetch latest version for ${packageName} (${ecosystem}): ${err.message}`);
   }
+
+  return undefined;
 }
 
 function upgradeEffort(findings: MaintenanceFinding[]): MaintenanceFinding['effort'] {
@@ -65,8 +103,11 @@ export async function adviseUpgrade(
   const context = await loadProjectContext(options?.projectPath);
   const dependency = context.dependencies.find((dep) => dep.name === packageName);
   const installed = dependency ? stripVersionRange(dependency.version) : undefined;
-  const target = options?.target ?? await fetchLatestVersion(packageName, context.projectPath);
+  const ecosystem = dependency?.ecosystem || 'JavaScript/TypeScript';
+  
+  const target = options?.target ?? await fetchLatestVersion(packageName, ecosystem, context.projectPath);
   const findings: MaintenanceFinding[] = [];
+  const manifest = ecosystem === 'Python' ? 'requirements.txt' : ecosystem === 'Rust' ? 'Cargo.toml' : ecosystem === 'Go' ? 'go.mod' : 'package.json';
 
   if (!dependency) {
     findings.push({
@@ -74,14 +115,14 @@ export async function adviseUpgrade(
       category: 'dependency',
       label: 'SAFE',
       title: `${packageName} is not installed`,
-      summary: `${packageName} is not in package.json`,
+      summary: `${packageName} is not in ${manifest}`,
       recommendation: 'ignore',
       urgency: 0,
       impact: 0,
       confidence: 9,
       effort: 'none',
       packageName,
-      files: ['package.json'],
+      files: [manifest],
     });
     return {
       packageName,
@@ -108,7 +149,7 @@ export async function adviseUpgrade(
       confidence: 8,
       effort: 'none',
       packageName,
-      files: ['package.json'],
+      files: [manifest],
     });
   } else if (target && installedMajor !== undefined && targetMajor !== undefined && targetMajor > installedMajor) {
     findings.push({
@@ -126,7 +167,7 @@ export async function adviseUpgrade(
       confidence: 8,
       effort: usageFiles.length > 3 ? '1 hour+' : '20 min',
       packageName,
-      files: usageFiles.length > 0 ? usageFiles : ['package.json'],
+      files: usageFiles.length > 0 ? usageFiles : [manifest],
     });
   } else {
     findings.push({
@@ -146,7 +187,7 @@ export async function adviseUpgrade(
       confidence: target ? 7 : 5,
       effort: usageFiles.length > 3 ? '20 min' : '5 min',
       packageName,
-      files: usageFiles.length > 0 ? usageFiles : ['package.json'],
+      files: usageFiles.length > 0 ? usageFiles : [manifest],
     });
   }
 
@@ -163,7 +204,7 @@ export async function adviseUpgrade(
       confidence: 9,
       effort: 'migration likely',
       packageName,
-      files: usageFiles.length > 0 ? usageFiles : ['package.json'],
+      files: usageFiles.length > 0 ? usageFiles : [manifest],
     });
   }
 

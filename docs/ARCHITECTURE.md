@@ -44,9 +44,11 @@ Determines the health score and ranks findings based on their severity, urgency,
 DevBrief maintains a clear separation of concern and flags scanners based on their maturity. This ensures trust is maintained and speculative findings are never surfaced prominently.
 
 ### Stable
-- **Runtime Lifecycle** (`runtime-scanner.ts`): Inspects Node.js, Python, and base Docker runtimes for official EOL dates and migration paths.
+- **Runtime Lifecycle** (`runtime-scanner.ts`): Inspects Node.js, Python, and base Docker runtimes. Lifecycle timelines are fetched dynamically from [endoflife.date](https://endoflife.date) with local cache files stored in `~/.devbrief/` for offline-first support.
 - **Dependency Risk** (`dependency-scanner.ts`): Scrapes local manifests to identify major version gaps, native module risk, and deprecated packages.
-- **Upgrade Confidence** (`upgrade-advisor.ts`): Evaluates target package versions against your repository imports to verify if you actively use affected entry points.
+- **Vulnerability Auditing** (`vulnerability-detector.ts`): Audits packages dynamically by auto-detecting lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`) and running the native package manager command, parsing various formats natively.
+- **Upgrade Confidence** (`upgrade-advisor.ts`): Evaluates target package versions against your repository imports to verify if you actively use affected entry points. Supports **npm**, **PyPI**, **Crates.io** (with proper User-Agent headers), and **Go Proxy** (with capital module path escaping) registries via high-performance direct HTTP requests routed through a **Resilient Registry Client** (`registry-client.ts`) featuring outbound throttling (limit: 5), exponential retry with jitter, 12h local file cache, and clean offline-first degradation (`DEVBRIEF_OFFLINE=1`).
+- **Safe Remediation** (`cli/index.ts`): Applies automatic, minor/patch upgrades using the `fix --safe-only` command. Restricts execution to clean git repositories (`git status --porcelain` precheck). Operates workspace-aware, running install upgrades inside the **sub-project manifest subdirectories** and supports **NPM/Yarn/PNPM/Bun, Cargo, Go modules, and Python requirements.txt** dependency updates.
 
 ### Beta
 - **Infrastructure Drift** (`infra-scanner.ts`): Analyzes Docker base images, Compose files, and GitHub Actions setups for outdated instructions or runner drift.

@@ -68,9 +68,9 @@ Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
 
 ---
 
-## ⚡ The Killer Feature: Upgrade Confidence
+## ⚡ The Killer Feature: Multi-Ecosystem Upgrade Confidence
 
-DevBrief parses your project imports to check if upgrading a package will break your code.
+DevBrief parses your project imports to check if upgrading a package will break your code. It supports JavaScript/TypeScript, Python (PyPI), Rust (Crates.io), and Go (Go Proxy) ecosystems natively:
 
 ```bash
 npx devbrief upgrade express --target 5.0.0
@@ -97,9 +97,10 @@ Recommended action: Review routing handlers in the affected files and test endpo
 DevBrief is transparent about what it can prove. We categorize our scans by maturity:
 
 ### Stable
-- **Runtime Lifecycle**: Node.js and Python EOL checks (e.g. `.nvmrc`, `.python-version`, Docker base images).
-- **Dependency Risk**: Major version gaps, deprecations, and native module rebuild risk.
-- **Upgrade Confidence**: Repository import cross-referencing for targeted risk assessment.
+- **Runtime Lifecycle**: Node.js and Python EOL checks (fetching dynamic timelines from [endoflife.date](https://endoflife.date) with local caching).
+- **Dependency Risk**: Dynamic auditing across npm, pnpm, yarn, and bun depending on lockfiles; major version gaps; native module rebuild risks.
+- **Upgrade Confidence**: Repository import cross-referencing and target version checks across **npm**, **PyPI**, **Crates.io**, and **Go Proxy** registries.
+- **Safe Remediation**: Automates low-risk package upgrades with a safeguard checking `git status --porcelain` before making local changes.
 
 ### Beta
 - **Infrastructure Drift**: Floating image tags, old runners, and Compose configuration mismatches.
@@ -121,9 +122,15 @@ DevBrief is transparent about what it can prove. We categorize our scans by matu
 
 ## CLI Commands
 
+All primary and secondary commands support formatting options (e.g. for CI/CD integrations) via the `--format` flag:
+*   `--format text` (Default CLI output)
+*   `--format markdown` (Collapsible GitHub Summary markdown format)
+*   `--format json` (Raw JSON payload)
+*   `--format quiet` (No console output, sets correct exit codes)
+
 ### Primary Commands
 - `npx devbrief doctor` — Full maintenance radar (scans all categories).
-- `npx devbrief upgrade <package>` — Evaluates if a dependency upgrade is safe for this project.
+- `npx devbrief upgrade <package>` — Evaluates if a dependency upgrade is safe for this project (supporting npm, PyPI, Crates.io, and Go Proxy).
 - `npx devbrief runtime` — Checks runtime EOL state (alias: `node-upgrade`).
 - `npx devbrief inbox` — Lists only urgent items and quick safe wins.
 
@@ -133,7 +140,7 @@ DevBrief is transparent about what it can prove. We categorize our scans by matu
 - `npx devbrief security` — Check security posture (committed `.env`, wildcard CORS, debug flags).
 - `npx devbrief services` — Detect drift in third-party API SDKs.
 - `npx devbrief weekly` — Builds a compact weekly plan.
-- `npx devbrief fix --safe-only` — Remediates low-risk, high-confidence local issues.
+- `npx devbrief fix --safe-only` — Automatically applies low-risk, high-confidence minor and patch dependency updates (requires a clean git working directory, checked via `git status --porcelain`).
 
 ---
 

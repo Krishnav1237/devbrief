@@ -1,13 +1,23 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { readProjectFile } from './project-context.js';
 import type { MaintenanceFinding, ProjectContext, Scanner } from './types.js';
 import { daysUntil, majorOf } from './version-utils.js';
+import { fetchWithRegistryClient } from '../utils/registry-client.js';
 
 interface RuntimeEol {
   name: string;
   eol: string;
   upgradeTo: string;
+}
+
+async function fetchWithCache(url: string, filename: string): Promise<any> {
+  const data = await fetchWithRegistryClient<any>(url, { timeout: 5000 });
+  if (data && Array.isArray(data)) {
+    return data;
+  }
+  return null;
 }
 
 const NODE_EOL: Record<number, RuntimeEol> = {
@@ -24,6 +34,89 @@ const PYTHON_EOL: Record<string, RuntimeEol> = {
   '3.10': { name: 'Python 3.10', eol: '2026-10-31', upgradeTo: 'Python 3.12 or newer' },
   '3.11': { name: 'Python 3.11', eol: '2027-10-31', upgradeTo: 'Python 3.13 or newer later' },
 };
+
+export async function getDynamicNodeEol(): Promise<Record<number, RuntimeEol>> {
+  const data = await fetchWithCache('https://endoflife.date/api/nodejs.json', 'nodejs-eol.json');
+
+  if (!data || !Array.isArray(data)) {
+    return NODE_EOL;
+  }
+
+  const result: Record<number, RuntimeEol> = {};
+
+  // Find active LTS versions for upgrade path suggestion
+  const activeLts = data
+    .filter((item: any) => {
+      const eolDate = new Date(item.eol);
+      return eolDate > new Date() && item.lts;
+    })
+    .map((item: any) => item.cycle)
+    .sort((a: string, b: string) => parseInt(a) - parseInt(b));
+
+  const defaultUpgradeTo = activeLts.length > 0
+    ? `Node ${activeLts.join(' or ')} LTS`
+    : 'next LTS release';
+
+  for (const item of data) {
+    const cycleNum = parseInt(item.cycle);
+    if (isNaN(cycleNum)) continue;
+
+    // Suggest upgrade to the next higher active LTS or the default list
+    const candidates = activeLts.filter(c => parseInt(c) > cycleNum);
+    const upgradeTo = candidates.length > 0
+      ? `Node ${candidates.join(' or ')} LTS`
+      : defaultUpgradeTo;
+
+    result[cycleNum] = {
+      name: `Node ${item.cycle}`,
+      eol: item.eol,
+      upgradeTo,
+    };
+  }
+
+  return result;
+}
+
+export async function getDynamicPythonEol(): Promise<Record<string, RuntimeEol>> {
+  const data = await fetchWithCache('https://endoflife.date/api/python.json', 'python-eol.json');
+
+  if (!data || !Array.isArray(data)) {
+    return PYTHON_EOL;
+  }
+
+  const result: Record<string, RuntimeEol> = {};
+
+  // Find active cycles
+  const activeCycles = data
+    .filter((item: any) => {
+      const eolDate = new Date(item.eol);
+      return eolDate > new Date();
+    })
+    .map((item: any) => item.cycle)
+    .sort((a: string, b: string) => parseFloat(a) - parseFloat(b));
+
+  const defaultUpgradeTo = activeCycles.length > 0
+    ? `Python ${activeCycles.join(' or ')}`
+    : 'newer Python 3 release';
+
+  for (const item of data) {
+    const cycleVal = parseFloat(item.cycle);
+    if (isNaN(cycleVal)) continue;
+
+    const candidates = activeCycles.filter(c => parseFloat(c) > cycleVal);
+    const upgradeTo = candidates.length > 0
+      ? `Python ${candidates.join(' or newer')}`
+      : defaultUpgradeTo;
+
+    result[item.cycle] = {
+      name: `Python ${item.cycle}`,
+      eol: item.eol,
+      upgradeTo,
+    };
+  }
+
+  return result;
+}
 
 const NATIVE_NODE_PACKAGES = new Set([
   'better-sqlite3',
@@ -130,12 +223,14 @@ export const runtimeScanner: Scanner = {
   name: 'runtime',
   async scan(context: ProjectContext): Promise<MaintenanceFinding[]> {
     const findings: MaintenanceFinding[] = [];
+    const dynamicNodeEol = await getDynamicNodeEol();
+    const dynamicPythonEol = await getDynamicPythonEol();
 
     for (const runtime of extractNodeRuntime(context)) {
       const major = majorOf(runtime.version);
       if (!major) continue;
 
-      let eol = NODE_EOL[major];
+      let eol = dynamicNodeEol[major];
       if (!eol && major < 16) {
         eol = { name: `Node ${major}`, eol: '2023-09-11', upgradeTo: 'Node 22 or 24 LTS' };
       }
@@ -145,7 +240,7 @@ export const runtimeScanner: Scanner = {
     }
 
     for (const runtime of extractPythonRuntime(context)) {
-      let eol = PYTHON_EOL[runtime.version];
+      let eol = dynamicPythonEol[runtime.version];
       if (!eol) {
         const val = parseFloat(runtime.version);
         if (!isNaN(val) && val < 3.8) {
