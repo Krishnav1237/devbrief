@@ -92,6 +92,18 @@ Recommended action: Review routing handlers in the affected files and test endpo
 
 ---
 
+## 🔒 Security & Vibe Coding Protections
+
+DevBrief provides targeted safeguards for vibe coders and AI-assisted workflows:
+
+- **Git Pre-commit Hook (`devbrief init-hook`):** Automatically registers a pre-commit hook that intercepts commits and runs `devbrief doctor --exit-code --quiet`. It blocks commits if critical vulnerabilities, configuration errors, or env drifts are found.
+- **Unignored `.env` Guard:** Checks if your local environment configuration files are unignored in `.gitignore` (using native `git check-ignore`), preventing accidental leaks of active API keys.
+- **AI-Generated Placeholder Detection:** Scans codebase for standard LLM placeholders (e.g. `YOUR_API_KEY_HERE`, `sk-proj-placeholder`) that indicate incomplete configuration.
+- **Environment Variable Drift:** Detects variables accessed in source files but undocumented in `.env.example` or unconfigured in local `.env` files.
+- **Phantom & Unused Dependency Auditing:** Scans source file imports to flag dependencies used but not declared in manifests, and declared dependencies that are never imported.
+
+---
+
 ## Scanner Maturity Levels
 
 DevBrief is transparent about what it can prove. We categorize our scans by maturity:
@@ -141,6 +153,7 @@ All primary and secondary commands support formatting options (e.g. for CI/CD in
 - `npx devbrief services` — Detect drift in third-party API SDKs.
 - `npx devbrief weekly` — Builds a compact weekly plan.
 - `npx devbrief fix --safe-only` — Automatically applies low-risk, high-confidence minor and patch dependency updates (requires a clean git working directory, checked via `git status --porcelain`).
+- `npx devbrief init-hook` — Installs a Git pre-commit hook that runs automated scans on every commit, blocking commits with critical vulnerabilities.
 
 ---
 

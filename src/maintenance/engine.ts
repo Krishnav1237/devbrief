@@ -15,12 +15,20 @@ import { securityScanner } from './security-scanner.js';
 import { serviceScanner } from './service-scanner.js';
 import { getWhyItMatters } from './explainability.js';
 import type { FindingCategory, MaintenanceFinding, ProjectContext, ScanResult, Scanner } from './types.js';
+import { vibeSecurityScanner, vibeDependencyScanner } from './vibe-scanner.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+import { typosquattingScanner } from './typosquatting-scanner.js';
 
 export const scannerRegistry: Record<string, Scanner[]> = {
-  risk: [dependencyRiskScanner, vulnerabilityIntelligenceScanner, javascriptScanner, pythonScanner, rustScanner, goScanner, javaScanner],
+  risk: [dependencyRiskScanner, vulnerabilityIntelligenceScanner, javascriptScanner, pythonScanner, rustScanner, goScanner, javaScanner, vibeDependencyScanner, typosquattingScanner],
   runtime: [runtimeScanner],
   infra: [infraScanner],
-  security: [securityScanner],
+  security: [securityScanner, vibeSecurityScanner, typosquattingScanner],
   services: [serviceScanner],
   ops: [opsScanner],
   cost: [costScanner],
@@ -39,6 +47,9 @@ export const scannerRegistry: Record<string, Scanner[]> = {
     serviceScanner,
     opsScanner,
     costScanner,
+    vibeSecurityScanner,
+    vibeDependencyScanner,
+    typosquattingScanner,
   ],
 };
 
@@ -60,11 +71,100 @@ function scannerFailure(scanner: Scanner, error: unknown): MaintenanceFinding {
   };
 }
 
+async function getGitState(projectPath: string): Promise<{ head: string; status: string } | null> {
+  try {
+    await execAsync('git rev-parse --is-inside-work-tree', { cwd: projectPath });
+    const { stdout: headStdout } = await execAsync('git rev-parse HEAD', { cwd: projectPath });
+    const { stdout: statusStdout } = await execAsync('git status --porcelain', { cwd: projectPath });
+    return {
+      head: headStdout.trim(),
+      status: statusStdout.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getCacheDir(projectPath: string): Promise<string> {
+  try {
+    const { stdout } = await execAsync('git rev-parse --git-common-dir', { cwd: projectPath });
+    const gitDir = stdout.trim();
+    return path.resolve(projectPath, gitDir);
+  } catch {
+    const fallback = path.join(projectPath, '.devbrief');
+    if (!fs.existsSync(fallback)) {
+      fs.mkdirSync(fallback, { recursive: true });
+    }
+    return fallback;
+  }
+}
+
+interface PersistentCacheEntry {
+  gitHead: string;
+  gitStatus: string;
+  command: string;
+  result: ScanResult;
+}
+
+async function readPersistentCache(projectPath: string, command: string): Promise<ScanResult | null> {
+  try {
+    const gitState = await getGitState(projectPath);
+    if (!gitState) return null;
+
+    const cacheDir = await getCacheDir(projectPath);
+    const cacheFile = path.join(cacheDir, `scan-cache-${command}.json`);
+
+    if (fs.existsSync(cacheFile)) {
+      const content = fs.readFileSync(cacheFile, 'utf-8');
+      const entry = JSON.parse(content) as PersistentCacheEntry;
+
+      if (
+        entry.gitHead === gitState.head &&
+        entry.gitStatus === '' &&
+        gitState.status === '' &&
+        entry.command === command
+      ) {
+        return entry.result;
+      }
+    }
+  } catch {
+    // Fail silently on cache read errors
+  }
+  return null;
+}
+
+async function writePersistentCache(projectPath: string, command: string, result: ScanResult): Promise<void> {
+  try {
+    const gitState = await getGitState(projectPath);
+    if (!gitState) return;
+
+    const cacheDir = await getCacheDir(projectPath);
+    const cacheFile = path.join(cacheDir, `scan-cache-${command}.json`);
+
+    const entry: PersistentCacheEntry = {
+      gitHead: gitState.head,
+      gitStatus: gitState.status,
+      command,
+      result,
+    };
+
+    fs.writeFileSync(cacheFile, JSON.stringify(entry, null, 2), 'utf-8');
+  } catch {
+    // Fail silently on cache write errors
+  }
+}
+
 export async function runMaintenanceScan(
   command: keyof typeof scannerRegistry,
   projectPath?: string,
 ): Promise<ScanResult> {
-  const context = await loadProjectContext(projectPath);
+  const resolvedPath = path.resolve(projectPath ?? process.cwd());
+
+  // Try reading persistent cache first (takes ~15ms)
+  const cachedResult = await readPersistentCache(resolvedPath, command);
+  if (cachedResult) return cachedResult;
+
+  const context = await loadProjectContext(resolvedPath);
   const cacheKey = `${command}:${context.projectPath}:${context.fingerprint}`;
   const cached = scanCache.get(cacheKey);
   if (cached) return cached;
@@ -100,6 +200,7 @@ export async function runMaintenanceScan(
   });
 
   scanCache.set(cacheKey, result);
+  await writePersistentCache(resolvedPath, command, result);
   return result;
 }
 

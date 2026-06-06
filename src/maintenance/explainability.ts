@@ -45,6 +45,21 @@ export function getWhyItMatters(finding: Omit<MaintenanceFinding, 'whyItMatters'
     if (summary.includes('.env') || title.includes('secret') || title.includes('env file')) {
       return 'Committed environment files leak API keys, database credentials, and session secrets to anyone with repository access.';
     }
+    if (summary.includes('undocumented') || title.includes('undocumented')) {
+      return 'Referencing environment variables in code without declaring them in .env.example prevents other developers or CI/CD servers from configuring the application correctly.';
+    }
+    if (summary.includes('missing local') || title.includes('missing local') || title.includes('missing from your local')) {
+      return 'Missing local env values cause runtime reference errors and crash application processes on startup.';
+    }
+    if (summary.includes('typosquatting') || title.includes('typosquatting')) {
+      return 'Typosquatted packages mimic popular libraries with slight name changes to trick developers into installing them, enabling execution of malicious code.';
+    }
+    if (summary.includes('hallucinated') || title.includes('hallucinated')) {
+      return 'Hallucinated dependencies do not exist on public registries. Attackers register these hallucinated names to run dependency confusion attacks and compromise codebases.';
+    }
+    if (summary.includes('recently published') || title.includes('recently published') || title.includes('brand-new')) {
+      return 'Recently published packages have higher security risk as they have not been vetted by the community and are common targets for malware distribution.';
+    }
     return 'Weak security postures leave your endpoints vulnerable to scanning bots and automated attacks.';
   }
 
@@ -68,6 +83,12 @@ export function getWhyItMatters(finding: Omit<MaintenanceFinding, 'whyItMatters'
   if (category === 'dependency') {
     if (summary.includes('major') || title.includes('major') || summary.includes('crosses')) {
       return 'Major version updates cross breaking-change boundaries, meaning they change APIs and require code updates.';
+    }
+    if (summary.includes('phantom') || title.includes('phantom')) {
+      return 'Phantom dependencies are imported in code but not declared in manifests. They work locally by accident but will fail during clean builds, deployment, or CI.';
+    }
+    if (summary.includes('unused') || title.includes('unused')) {
+      return 'Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.';
     }
     return 'Outdated dependencies fall behind on optimizations and make it harder to apply future security hotfixes.';
   }

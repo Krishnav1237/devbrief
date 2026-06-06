@@ -89,12 +89,19 @@ async function fetchWithRetryAndJitter<T>(
   throw lastError;
 }
 
+export class RegistryNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RegistryNotFoundError';
+  }
+}
+
 /**
  * Robust cached and throttled HTTP registry client.
  */
 export async function fetchWithRegistryClient<T>(
   url: string,
-  options?: { headers?: Record<string, string>; timeout?: number },
+  options?: { headers?: Record<string, string>; timeout?: number; throwOn404?: boolean },
 ): Promise<T | undefined> {
   const cachePath = getCacheFilePath(url);
   const isOffline = process.env.DEVBRIEF_OFFLINE === '1';
@@ -125,6 +132,9 @@ export async function fetchWithRegistryClient<T>(
       writeToCacheFile<T>(cachePath, url, data);
       return data;
     } catch (err: any) {
+      if (options?.throwOn404 && err.response && err.response.status === 404) {
+        throw new RegistryNotFoundError(`Package not found at ${url}`);
+      }
       // 4. Fallback to expired cache if fetch fails (resilience check)
       const expiredCache = readFromCacheFile<T>(cachePath, true);
       if (expiredCache !== undefined) {

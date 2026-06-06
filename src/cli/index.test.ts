@@ -19,6 +19,10 @@ vi.mock('../maintenance/engine.js', () => ({
 
 const mockExec = vi.fn();
 let mockGitStatusStdout = '';
+let mockGitRevParseError: Error | null = null;
+let mockGitRevParseStdout = '.git/hooks';
+let mockIsGitRepo = true;
+let mockTestRunnerFail = false;
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -29,17 +33,32 @@ vi.mock('child_process', async (importOriginal) => {
       mockExec(...args);
       const cb = args[args.length - 1];
       if (typeof cb === 'function') {
-        if (cmd === 'git status --porcelain') {
-          cb(null, { stdout: mockGitStatusStdout });
+        if (cmd.includes('git rev-parse --is-inside-work-tree')) {
+          if (mockIsGitRepo) {
+            cb(null, { stdout: 'true', stderr: '' });
+          } else {
+            cb(new Error('not a git repository'), null);
+          }
+        } else if (cmd === 'git status --porcelain') {
+          cb(null, { stdout: mockGitStatusStdout, stderr: '' });
+        } else if (cmd.includes('git rev-parse --git-path hooks')) {
+          if (mockGitRevParseError) {
+            cb(mockGitRevParseError, null);
+          } else {
+            cb(null, { stdout: mockGitRevParseStdout, stderr: '' });
+          }
+        } else if ((cmd.includes('npm test') || cmd.includes('pnpm test') || cmd.includes('yarn test') || cmd.includes('bun test') || cmd.includes('cargo test') || cmd.includes('go test') || cmd.includes('pytest')) && mockTestRunnerFail) {
+          cb(new Error('Test suite failed'), { stdout: '', stderr: 'Assertion error' });
         } else {
-          cb(null, { stdout: 'Mocked upgrade output' });
+          cb(null, { stdout: 'Mocked output', stderr: '' });
         }
       }
     }
   };
 });
 
-const { stackAdd, stackRemove, stackList, fixCommand } = await import('./index.js');
+const { stackAdd, stackRemove, stackList, fixCommand, initHookCommand, detectTestCommands } = await import('./index.js');
+import { cleanSecretsCommand } from './clean-secrets.js';
 
 describe('stackAdd', () => {
   beforeEach(() => {
@@ -486,3 +505,240 @@ describe('fixCommand', () => {
     expect(mockRunMaintenanceScan).not.toHaveBeenCalled();
   });
 });
+
+describe('initHookCommand', () => {
+  const tempDir = path.resolve(process.cwd(), 'temp-hook-test');
+  let tempRepoDir: string;
+
+  beforeEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(tempDir, { recursive: true });
+    tempRepoDir = path.join(tempDir, 'repo-' + Math.random().toString(36).substring(2, 7));
+    fs.mkdirSync(tempRepoDir, { recursive: true });
+    mockGitRevParseError = null;
+    mockGitRevParseStdout = path.join(tempRepoDir, '.git', 'hooks');
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails if git is not initialized', async () => {
+    mockGitRevParseError = new Error('not a git repository');
+    await expect(initHookCommand({ path: tempRepoDir })).rejects.toThrow('Not a git repository.');
+  });
+
+  it('installs pre-commit hook successfully if it does not exist', async () => {
+    const res = await initHookCommand({ path: tempRepoDir });
+    expect(res).toContain('Git pre-commit hook installed successfully');
+    
+    const hookPath = path.join(tempRepoDir, '.git', 'hooks', 'pre-commit');
+    expect(fs.existsSync(hookPath)).toBe(true);
+    const content = fs.readFileSync(hookPath, 'utf-8');
+    expect(content).toContain('devbrief doctor --exit-code --quiet');
+  });
+
+  it('updates pre-commit hook in place if it already contains devbrief', async () => {
+    const hooksDir = path.join(tempRepoDir, '.git', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const hookPath = path.join(hooksDir, 'pre-commit');
+    fs.writeFileSync(hookPath, '# existing devbrief check\n', 'utf-8');
+
+    const res = await initHookCommand({ path: tempRepoDir });
+    expect(res).toContain('Git pre-commit hook updated successfully');
+    
+    const content = fs.readFileSync(hookPath, 'utf-8');
+    expect(content).toContain('devbrief doctor --exit-code --quiet');
+  });
+
+  it('backs up existing pre-commit hook and installs new one if it does not contain devbrief', async () => {
+    const hooksDir = path.join(tempRepoDir, '.git', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const hookPath = path.join(hooksDir, 'pre-commit');
+    fs.writeFileSync(hookPath, '# custom bash script\n', 'utf-8');
+
+    const res = await initHookCommand({ path: tempRepoDir });
+    expect(res).toContain('Git pre-commit hook installed successfully. Existing hook backed up to');
+    
+    const backupPath = `${hookPath}.bak`;
+    expect(fs.existsSync(backupPath)).toBe(true);
+    expect(fs.readFileSync(backupPath, 'utf-8')).toBe('# custom bash script\n');
+
+    const content = fs.readFileSync(hookPath, 'utf-8');
+    expect(content).toContain('devbrief doctor --exit-code --quiet');
+  });
+});
+
+describe('detectTestCommands', () => {
+  it('correctly maps files to test runners', () => {
+    const tempDir = path.resolve(process.cwd(), 'temp-detect-test');
+    if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    // JS/TS
+    fs.writeFileSync(path.join(tempDir, 'package.json'), '{}', 'utf-8');
+    const cmds1 = detectTestCommands(tempDir, new Set(['package.json']));
+    expect(cmds1).toHaveLength(1);
+    expect(cmds1[0].cmd).toBe('npm test');
+
+    // Cargo.toml
+    fs.writeFileSync(path.join(tempDir, 'Cargo.toml'), '', 'utf-8');
+    const cmds2 = detectTestCommands(tempDir, new Set(['Cargo.toml']));
+    expect(cmds2).toHaveLength(1);
+    expect(cmds2[0].cmd).toBe('cargo test');
+
+    // go.mod
+    fs.writeFileSync(path.join(tempDir, 'go.mod'), '', 'utf-8');
+    const cmds3 = detectTestCommands(tempDir, new Set(['go.mod']));
+    expect(cmds3).toHaveLength(1);
+    expect(cmds3[0].cmd).toBe('go test ./...');
+
+    // pytest
+    fs.writeFileSync(path.join(tempDir, 'requirements.txt'), '', 'utf-8');
+    const cmds4 = detectTestCommands(tempDir, new Set(['requirements.txt']));
+    expect(cmds4).toHaveLength(1);
+    expect(cmds4[0].cmd).toBe('pytest');
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+});
+
+describe('fixCommand self-healing', () => {
+  const tempDir = path.resolve(process.cwd(), 'temp-healing-test');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGitStatusStdout = '';
+    mockIsGitRepo = true;
+    mockTestRunnerFail = false;
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails if verify is requested but repository is not git', async () => {
+    mockIsGitRepo = false;
+    const res = await fixCommand({ path: tempDir, safeOnly: true, verify: true });
+    expect(res).toContain('ERROR: Git repository is required for the --verify option.');
+  });
+
+  it('runs tests, commits on success, and rolls back on failure', async () => {
+    fs.writeFileSync(path.join(tempDir, 'package.json'), '{}', 'utf-8');
+    mockRunMaintenanceScan.mockResolvedValue({
+      findings: [
+        {
+          id: 'vuln:lodash',
+          category: 'vulnerability',
+          label: 'ACTION REQUIRED',
+          title: 'lodash vuln',
+          summary: 'lodash vuln',
+          recommendation: 'remediate',
+          urgency: 10,
+          impact: 9,
+          confidence: 9,
+          effort: '5 min',
+          packageName: 'lodash',
+          files: ['package.json'],
+        },
+      ],
+    });
+
+    // Test success case
+    mockTestRunnerFail = false;
+    let res = await fixCommand({ path: tempDir, safeOnly: true, verify: true });
+    expect(res).toContain('Running: npm test');
+    expect(res).toContain('All tests passed! Committing changes...');
+    expect(res).toContain('Changes successfully committed.');
+
+    // Test failure case
+    mockTestRunnerFail = true;
+    res = await fixCommand({ path: tempDir, safeOnly: true, verify: true });
+    expect(res).toContain('Running: npm test');
+    expect(res).toContain('Tests failed for command "npm test". Reverting all changes...');
+    expect(res).toContain('Workspace successfully reverted to HEAD.');
+  });
+});
+
+describe('cleanSecretsCommand', () => {
+  const tempDir = path.resolve(process.cwd(), 'temp-secrets-test');
+
+  beforeEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds and clean secrets in multi-language codebase', async () => {
+    // JS File
+    const jsPath = path.join(tempDir, 'index.js');
+    fs.writeFileSync(jsPath, 'const apiKey = "sk-proj-placeholder";\n', 'utf-8');
+
+    // Python File
+    const pyPath = path.join(tempDir, 'app.py');
+    fs.writeFileSync(pyPath, 'token = \'xoxb-1234567890-1234567890\'\n', 'utf-8');
+
+    // Go File
+    const goPath = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goPath, 'package main\n\nfunc main() {\n\tkey := "AKIA1234567890123456"\n}\n', 'utf-8');
+
+    // Rust File
+    const rsPath = path.join(tempDir, 'main.rs');
+    fs.writeFileSync(rsPath, 'fn main() {\n    let gh = "ghp_123456789012345678901234567890123456";\n}\n', 'utf-8');
+
+    const result = await cleanSecretsCommand({ path: tempDir });
+    expect(result).toContain('SUCCESS: Secrets refactored successfully!');
+
+    // Check refactored content
+    const jsContent = fs.readFileSync(jsPath, 'utf-8');
+    expect(jsContent).toContain('const apiKey = process.env.OPENAI_API_KEY_PLACEHOLDER;');
+
+    const pyContent = fs.readFileSync(pyPath, 'utf-8');
+    expect(pyContent).toContain('import os');
+    expect(pyContent).toContain('token = os.environ.get("SLACK_TOKEN")');
+
+    const goContent = fs.readFileSync(goPath, 'utf-8');
+    expect(goContent).toContain('"os"');
+    expect(goContent).toContain('key := os.Getenv("AWS_ACCESS_KEY_ID")');
+
+    const rsContent = fs.readFileSync(rsPath, 'utf-8');
+    expect(rsContent).toContain('let gh = std::env::var("GITHUB_TOKEN").unwrap_or_default();');
+
+    // Check env files
+    const envPath = path.join(tempDir, '.env');
+    expect(fs.existsSync(envPath)).toBe(true);
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    expect(envContent).toContain('OPENAI_API_KEY_PLACEHOLDER=sk-proj-placeholder');
+    expect(envContent).toContain('SLACK_TOKEN=xoxb-1234567890-1234567890');
+    expect(envContent).toContain('AWS_ACCESS_KEY_ID=AKIA1234567890123456');
+    expect(envContent).toContain('GITHUB_TOKEN=ghp_123456789012345678901234567890123456');
+
+    const envExamplePath = path.join(tempDir, '.env.example');
+    expect(fs.existsSync(envExamplePath)).toBe(true);
+    const envExampleContent = fs.readFileSync(envExamplePath, 'utf-8');
+    expect(envExampleContent).toContain('OPENAI_API_KEY_PLACEHOLDER=');
+
+    const gitignorePath = path.join(tempDir, '.gitignore');
+    expect(fs.existsSync(gitignorePath)).toBe(true);
+    const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
+    expect(gitignoreContent).toContain('.env');
+  });
+});
+

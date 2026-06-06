@@ -1,5 +1,10 @@
 import { readProjectFile } from './project-context.js';
 import type { MaintenanceFinding, ProjectContext, Scanner } from './types.js';
+import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
   { name: 'AWS access key', regex: /AKIA[0-9A-Z]{16}/ },
@@ -7,6 +12,14 @@ const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
   { name: 'OpenAI API key', regex: /sk-[A-Za-z0-9_-]{20,}/ },
   { name: 'Private key', regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { name: 'Slack token', regex: /xox[baprs]-[A-Za-z0-9-]{20,}/ },
+];
+
+const PLACEHOLDER_PATTERNS: Array<{ name: string; regex: RegExp }> = [
+  { name: 'Generic API key placeholder', regex: /\bYOUR_[A-Z0-9_]*(KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*\b/i },
+  { name: 'Stripe placeholder API key', regex: /\bsk_test_placeholder\b/i },
+  { name: 'OpenAI placeholder API key', regex: /\bsk-proj-placeholder\b/i },
+  { name: 'Generic insert token placeholder', regex: /\bINSERT_[A-Z0-9_]+_HERE\b/i },
+  { name: 'Generic TODO secret placeholder', regex: /\bTODO_ENTER_[A-Z0-9_]+\b/i },
 ];
 
 function securityFinding(
@@ -69,6 +82,19 @@ export const securityScanner: Scanner = {
         }
       }
 
+      for (const pattern of PLACEHOLDER_PATTERNS) {
+        if (pattern.regex.test(content)) {
+          findings.push(securityFinding(
+            `security:placeholder:${pattern.name}:${file}`,
+            'RISKY',
+            `AI placeholder found in code: ${pattern.name}`,
+            `replace placeholder in ${file} with actual configuration or environment variable`,
+            [file],
+            9,
+          ));
+        }
+      }
+
       if (/cors\s*\(\s*\{[^}]*origin\s*:\s*['"]\*['"]/s.test(content) || /Access-Control-Allow-Origin['"]?\s*[:,\s]\s*['"]?\*/.test(content)) {
         findings.push(securityFinding(
           `security:cors:${file}`,
@@ -102,16 +128,47 @@ export const securityScanner: Scanner = {
       }
     }
 
+    let isGitRepo = false;
+    try {
+      await execAsync('git rev-parse --is-inside-work-tree', { cwd: context.projectPath });
+      isGitRepo = true;
+    } catch {
+      isGitRepo = false;
+    }
+
     for (const file of context.envFiles) {
-      if (!file.includes('example') && !file.includes('sample')) {
-        findings.push(securityFinding(
-          `security:env-file:${file}`,
-          'REVIEW',
-          `${file} is present in the project tree`,
-          'confirm it is ignored and never committed with real values',
-          [file],
-          7,
-        ));
+      if (!file.includes('example') && !file.includes('sample') && !file.includes('template')) {
+        let isIgnored = false;
+        if (isGitRepo) {
+          try {
+            const absolutePath = path.resolve(context.projectPath, file);
+            await execAsync(`git check-ignore -q "${absolutePath}"`, { cwd: context.projectPath });
+            isIgnored = true;
+          } catch (err: any) {
+            // Exit code 1 means it is NOT ignored.
+            isIgnored = false;
+          }
+        }
+
+        if (isGitRepo && !isIgnored) {
+          findings.push(securityFinding(
+            `security:env-unignored:${file}`,
+            'ACTION REQUIRED',
+            `Unignored environment configuration file: ${file}`,
+            `add ${file} to your .gitignore immediately to prevent credential leaks`,
+            [file],
+            10,
+          ));
+        } else {
+          findings.push(securityFinding(
+            `security:env-file:${file}`,
+            'REVIEW',
+            `${file} is present in the project tree`,
+            'confirm it is ignored and never committed with real values',
+            [file],
+            7,
+          ));
+        }
       }
     }
 
