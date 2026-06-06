@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { readProjectFile } from './project-context.js';
 import type { MaintenanceFinding, ProjectContext, Scanner } from './types.js';
 import { daysUntil, majorOf } from './version-utils.js';
@@ -12,7 +11,7 @@ interface RuntimeEol {
   upgradeTo: string;
 }
 
-async function fetchWithCache(url: string, filename: string): Promise<any> {
+async function fetchWithCache(url: string, _filename: string): Promise<any> {
   const data = await fetchWithRegistryClient<any>(url, { timeout: 5000 });
   if (data && Array.isArray(data)) {
     return data;

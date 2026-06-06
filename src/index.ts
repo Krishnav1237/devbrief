@@ -19,7 +19,7 @@ import { startServer } from './server/index.js';
 import { startScheduler, stopScheduler } from './scheduler/index.js';
 
 // Mastra instance — registers the DevBrief workflow with the framework
-import { mastra } from './mastra/index.js';
+import './mastra/index.js';
 
 async function main(): Promise<void> {
   // 1. Validate environment variables

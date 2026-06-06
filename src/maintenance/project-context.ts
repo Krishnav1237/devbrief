@@ -359,8 +359,9 @@ function isDockerFile(file: string): boolean {
 }
 
 function isEnvFile(file: string): boolean {
+  if (file.startsWith('docs/') || file.includes('/docs/')) return false;
   const name = file.split('/').pop() ?? file;
-  return name === '.env' || name.startsWith('.env.') || name.endsWith('.env');
+  return name === '.env' || name.startsWith('.env.') || name.includes('.env.');
 }
 
 function isConfigFile(file: string): boolean {

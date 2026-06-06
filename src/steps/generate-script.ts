@@ -1,12 +1,10 @@
 import { z } from 'zod';
 import {
   StepErrorSchema,
-  type StepError,
 } from '../models/index.js';
 import {
   ClassifiedChangeEntrySchema,
   type ClassifiedChangeEntry,
-  type PipelineStatus,
 } from './summarize.js';
 
 // ---------------------------------------------------------------------------
@@ -41,13 +39,6 @@ const RISK_ORDER: readonly string[] = [
   'CRITICAL',
   'BREAKING',
   'MINOR',
-] as const;
-
-const CLASSIFICATION_ORDER: readonly ClassifiedChangeEntry['classification'][] = [
-  'breaking',
-  'deprecation',
-  'feature',
-  'patch',
 ] as const;
 
 // ---------------------------------------------------------------------------

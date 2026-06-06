@@ -19,12 +19,58 @@ Instead of generating more alerts, DevBrief helps you decide what actually deser
 
 ---
 
+## 🩺 The Flagship Workflow: Doctor Scan
+
+Run a fast, zero-configuration local scan on a repository:
+
+```bash
+npx devbrief doctor --path examples/fixtures/npm-app
+```
+
+```text
+EOL: Node 18 is past EOL (2025-04-30)
+Health: 38/100
+Breakdown:
+  Runtime Lifecycle:   0/25
+  Dependency Risk:     9/25
+  Infrastructure:      25/25
+  Security & Services: 4/25
+
+Detected: JavaScript/TypeScript (Express)
+Package manager: npm
+Scanned: 3 files, 3 dependencies, 1 runtime, 0 infra, 0 config/security, 0 service signals
+
+EOL: Node 18 is past EOL (2025-04-30)  [package.json]
+  Evidence: smallest safe path: Node 22 or 24 or 26 LTS
+  Decision: upgrade, 1 hour+, confidence: High
+  Why this matters: Security fixes and critical patches no longer ship after a runtime reaches End-of-Life (EOL).
+
+REVIEW: Express app has no helmet dependency  [package.json]
+  Evidence: add security headers if this serves public HTTP traffic
+  Decision: review, 5 min, confidence: Medium
+  Why this matters: Weak security postures leave your endpoints vulnerable to scanning bots and automated attacks.
+
+REVIEW: better-sqlite3 may need rebuilds on Node upgrades  [package.json]
+  Decision: review, 20 min, confidence: High
+  Why this matters: Drift in runtime versions between development and production can cause silent runtime crashes.
+
+REVIEW: Package "better-sqlite3" is declared in manifests but never imported in code  [package.json]
+  Evidence: safe to remove if not used for tooling or dynamic/peer loading
+  Decision: review, 5 min, confidence: High
+  Why this matters: Unused dependencies bloat the container image size, slow down npm install times, and increase the security attack surface.
+
+Ignored: 7 low-signal items hidden by default
+Next: upgrade - Node 18 is past EOL (2025-04-30) (1 hour+)
+```
+
+---
+
 ## ⚡ The Hero Feature: Multi-Ecosystem Upgrade Confidence
 
 Every scanner can tell you when a package is out of date. DevBrief is different: it parses your imports in JavaScript/TypeScript, Python, Go, and Rust to check if upgrading a package will break your code.
 
 ```bash
-npx devbrief upgrade express --target 5.0.0
+npx devbrief upgrade express --target 5.0.0 --path examples/fixtures/npm-app
 ```
 
 ```text
@@ -33,49 +79,10 @@ Installed: 4.18.2
 Target: 5.0.0
 Effort: 20 min
 
-RISKY: express 4.18.2 -> 5.0.0 crosses a major version
-  Affected files: src/server.ts, src/api/users.ts
+RISKY: express 4.18.2 -> 5.0.0 crosses a major version  [src/server.ts]
+  Evidence: touches code you actually use in 1 file
   Decision: review, 20 min, confidence: High
-  Why this matters: Express 5 introduces breaking routing behaviors and changes query parser settings.
-
-Recommended action: Review routing handlers in the affected files and test endpoint behavior.
-```
-
----
-
-## 🩺 The Flagship Workflow: Doctor Scan
-
-Run a fast, zero-configuration local scan on your repository:
-
-```bash
-npx devbrief doctor
-```
-
-```text
-EOL: Node 20 is past EOL (2026-04-30)
-Health: 72/100
-Breakdown:
-  Runtime Lifecycle:   15/25
-  Dependency Risk:     22/25
-  Infrastructure:      20/25
-  Security & Services: 15/25
-
-Detected: JavaScript/TypeScript (Next.js, React)
-Package manager: pnpm
-Scanned: 74 files, 118 dependencies, 2 runtime, 4 infra, 3 config/security, 1 service signals
-
-EOL: Node 20 is past EOL (2026-04-30) [package.json]
-  Evidence: smallest safe path: Node 22 or 24 LTS
-  Decision: upgrade, 1 hour+, confidence: High
-  Why this matters: Security fixes and performance improvements no longer ship for EOL runtimes.
-
-REVIEW: CORS origin is configured as wildcard [src/server.ts]
-  Evidence: CORS origin is '*'
-  Decision: review, 20 min, confidence: Medium
-  Why this matters: Permissive wildcards allow cross-origin requests from arbitrary websites.
-
-Ignored: 5 low-signal items hidden by default
-Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
+  Why this matters: Major version updates cross breaking-change boundaries, meaning they change APIs and require code updates.
 ```
 
 ---
@@ -91,11 +98,11 @@ Next: upgrade - Node 20 is past EOL (2026-04-30) (1 hour+)
 
 ## CLI Commands Reference
 
-All primary and secondary commands support formatting options (e.g. for CI/CD integrations) via the `--format` flag:
+Scan-based primary and secondary commands (`doctor`, `risk`, `runtime`, `infra`, `security`, `services`) support formatting options (e.g. for CI/CD integrations) via the `--format` flag:
 *   `--format text` (Default CLI output)
 *   `--format markdown` (Collapsible GitHub Summary markdown format)
 *   `--format json` (Raw JSON payload)
-*   `--format quiet` (No console output, sets correct exit codes)
+*   `--format quiet` (Print only summary statistics, sets correct exit codes)
 
 ### Primary Commands
 *   `npx devbrief doctor` — Runs the smart maintenance radar and shows what needs attention first.

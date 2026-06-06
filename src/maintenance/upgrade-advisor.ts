@@ -5,6 +5,7 @@ import { loadProjectContext } from './project-context.js';
 import type { MaintenanceFinding } from './types.js';
 import { compareVersions, majorOf, stripVersionRange } from './version-utils.js';
 import { fetchWithRegistryClient } from '../utils/registry-client.js';
+import { getWhyItMatters } from './explainability.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -206,6 +207,10 @@ export async function adviseUpgrade(
       packageName,
       files: usageFiles.length > 0 ? usageFiles : [manifest],
     });
+  }
+
+  for (const finding of findings) {
+    finding.whyItMatters = getWhyItMatters(finding);
   }
 
   return {

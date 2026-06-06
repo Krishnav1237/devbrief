@@ -36,12 +36,6 @@ export type ScrapeOutput = z.infer<typeof ScrapeOutputSchema>;
 // Version extraction
 // ---------------------------------------------------------------------------
 
-/**
- * Regex matching common changelog version headers:
- *   ## v2.4.1, ## Release 2.4.1, ## [2.4.1], ## 2.4.1 - 2024-01-15
- */
-const VERSION_HEADER_RE =
-  /^#{1,3}\s*(?:v|release\s+)?\[?(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)\]?/im;
 
 /**
  * Global version to split markdown into sections by version headers.

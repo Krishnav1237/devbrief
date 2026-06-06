@@ -1,6 +1,6 @@
-import { analyzeChangelog, ChangelogAnalysis } from './changelog-analyzer';
-import { detectVulnerabilities, Vulnerability } from './vulnerability-detector';
-import { ParsedDependency } from './package-parser';
+import { analyzeChangelog } from './changelog-analyzer.js';
+import { detectVulnerabilities, Vulnerability } from './vulnerability-detector.js';
+import { ParsedDependency } from './package-parser.js';
 
 export interface RiskClassification {
   riskLevel: 'CRITICAL' | 'BREAKING' | 'MINOR';
@@ -17,7 +17,7 @@ export interface RiskClassification {
  */
 export async function classifyRisk(
   libraryName: string,
-  version: string,
+  _version: string,
   changelogText: string,
   userDependencies: ParsedDependency[]
 ): Promise<RiskClassification> {

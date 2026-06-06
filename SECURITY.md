@@ -15,6 +15,6 @@ Only the latest major/minor release is actively supported with security updates.
 
 ## Reporting a Vulnerability
 
-1. Report the vulnerability via the GitHub Repository Security tab (Private Vulnerability Reporting) or by emailing security@devbrief.io.
+1. Report the vulnerability via the GitHub Repository Security tab (Private Vulnerability Reporting) or contact the project maintainers.
 2. Include reproduction steps, sample payloads, or code snippets.
 3. We will acknowledge receipt of the report within 48 hours and work with you to remediate it.

@@ -11,7 +11,6 @@
  * Requirements: 2.4, 4.4, 4.6, 5.6, 9.5
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type { TriggerType } from './cli/run-pipeline.js';
 import type { RunRecord, RunStatus, StepError } from './models/index.js';
 import { loadStackConfig } from './utils/config-io.js';
@@ -30,7 +29,6 @@ import {
   createInitialPipelineState,
   type PipelineState,
 } from './mastra/workflows/devbrief-pipeline.js';
-import { mastra } from './mastra/index.js';
 
 // Step imports (kept for direct execution fallback)
 import { scrapeStep } from './steps/scrape.js';

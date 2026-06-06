@@ -23,10 +23,10 @@ Copy `.env.example` from the root of the project to `.env` to customize these se
 DevBrief stores local configuration, state, and cache in your user home directory:
 
 - `~/.devbrief/` — Home directory for storage
-- `~/.devbrief/devbrief.db` — SQLite database tracking project metadata and history
-- `~/.devbrief/eol-cache/` — Dynamic EOL lifecycle timelines cached from `endoflife.date` (24h TTL)
-- `~/.devbrief/registry-cache/` — Package version registry lookup responses cached from npm/PyPI/Crates/Go Proxy (12h TTL)
-- `~/.devbrief/stack.json` — Tracks release monitoring (legacy release briefing)
+- `~/.devbrief/devbrief.db` — SQLite database tracking run records and change history (legacy release briefing)
+- `~/.devbrief/registry-cache/` — Package registry and runtime EOL lifecycle timelines cached from npm/PyPI/Crates/Go/endoflife.date (12h TTL)
+- `~/.devbrief/stack-config.json` — Tracks library monitoring configuration (legacy release briefing)
+- `~/.devbrief/notification-config.json` — Tracks webhook/email notification channels configuration (legacy release briefing)
 - `~/.devbrief/audio/` — Stores generated briefing recordings (legacy release briefing)
 - `~/.devbrief/plugins/` — Global directory for custom scanner plugins loaded dynamically at runtime
 - `.devbrief/plugins/` — Project-local directory for custom scanner plugins loaded dynamically at runtime

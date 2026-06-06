@@ -97,7 +97,14 @@ export const vibeSecurityScanner: Scanner = {
     // Combined regex for JS, Python, Go, Rust environment accesses
     const envRegex = /\b(?:process\.env\.([A-Za-z0-9_]+)|process\.env\[['"]([A-Za-z0-9_]+)['"]\]|os\.environ\.get\(['"]([A-Za-z0-9_]+)['"]\)|os\.getenv\(['"]([A-Za-z0-9_]+)['"]\)|os\.environ\[['"]([A-Za-z0-9_]+)['"]\]|os\.Getenv\(['"]([A-Za-z0-9_]+)['"]\)|env::var\(['"]([A-Za-z0-9_]+)['"]\))/g;
 
-    for (const file of context.sourceFiles) {
+    const nonTestFiles = context.sourceFiles.filter(
+      (file) =>
+        !/\.(test|spec)\.[cm]?[jt]sx?$/.test(file) &&
+        !file.includes('/tests/') &&
+        !file.startsWith('tests/')
+    );
+
+    for (const file of nonTestFiles) {
       let content = '';
       try {
         content = readProjectFile(context, file);
@@ -170,13 +177,14 @@ export const vibeDependencyScanner: Scanner = {
     const importedDeps = new Map<string, Set<string>>();
 
     // Standard import regexes for JS, Python, Go, Rust
-    const jsImportRegex = /(?:import\s+.*?\s+from\s+['"]([^'"]+)['"]|import\s*\(?['"]([^'"]+)['"]\)?|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+    const jsImportRegex = /(?:(?<=^|[\s;(=])import\s+.*?\s+from\s+['"]([^'\"\s\(\)\{\}\[\]\;,]+)['"]|(?<=^|[\s;(=])import\s*\(?['"]([^'\"\s\(\)\{\}\[\]\;,]+)['"]\)?|(?<=^|[\s;(=])require\s*\(\s*['"]([^'\"\s\(\)\{\}\[\]\;,]+)['"]\s*\))/g;
     const pyImportRegex = /(?:^\s*import\s+([A-Za-z0-9_.-]+)|^\s*from\s+([A-Za-z0-9_.-]+)\s+import)/gm;
-    const goImportRegex = /import\s+\(?\s*(?:[A-Za-z0-9_.-]+\s+)?['"]([^'"]+)['"]/g;
+    const goImportRegex = /(?<=^|[\s;(=])import\s+\(?\s*(?:[A-Za-z0-9_.-]+\s+)?['"]([^'\"\s\(\)\{\}\[\]\;,]+)['"]/g;
     const rustImportRegex = /\bextern\s+crate\s+([A-Za-z0-9_]+)|use\s+([A-Za-z0-9_]+)::/g;
 
     const extractJsBasePackage = (importPath: string): string => {
       if (importPath.startsWith('.') || importPath.startsWith('/')) return '';
+      if (importPath.startsWith('node:')) return '';
       // Support scoped package like @nestjs/core
       const parts = importPath.split('/');
       if (importPath.startsWith('@') && parts.length >= 2) {
@@ -185,7 +193,14 @@ export const vibeDependencyScanner: Scanner = {
       return parts[0] ?? '';
     };
 
-    for (const file of context.sourceFiles) {
+    const nonTestFiles = context.sourceFiles.filter(
+      (file) =>
+        !/\.(test|spec)\.[cm]?[jt]sx?$/.test(file) &&
+        !file.includes('/tests/') &&
+        !file.startsWith('tests/')
+    );
+
+    for (const file of nonTestFiles) {
       let content = '';
       try {
         content = readProjectFile(context, file);

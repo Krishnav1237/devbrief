@@ -7,7 +7,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { loadStackConfig, saveStackConfig } from '../utils/config-io.js';
-import type { StackConfiguration, StackLibrary } from '../models/index.js';
+import type { StackLibrary } from '../models/index.js';
 import { validateEnvVars } from './env-validation.js';
 import { runPipeline } from './run-pipeline.js';
 import { runMaintenanceScan } from '../maintenance/engine.js';
@@ -417,7 +417,7 @@ function promptInteractiveFixes(findings: any[]): Promise<any[]> {
     hideCursor();
     render(true);
 
-    const onKeypress = (str: string, key: any) => {
+    const onKeypress = (_str: string, key: any) => {
       if (!key) return;
       if (key.ctrl && key.name === 'c') {
         cleanup();
@@ -466,12 +466,9 @@ export async function fixCommand(options?: { path?: string; safeOnly?: boolean; 
     return 'REVIEW: use `devbrief fix --safe-only` so risky upgrades are never applied silently in non-TTY environments';
   }
 
-  // Check if git is a repo if verify is requested
-  let isGit = false;
   if (options?.verify) {
     try {
       await execAsync('git rev-parse --is-inside-work-tree', { cwd: projectPath });
-      isGit = true;
     } catch {
       return 'ERROR: Git repository is required for the --verify option.';
     }

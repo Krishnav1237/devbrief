@@ -15,8 +15,6 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ChangeEntrySchema,
   StepErrorSchema,
-  type ChangeEntry,
-  type StepError,
   type RunRecord,
   type RunStatus,
 } from '../../models/index.js';

@@ -17,7 +17,9 @@
     "devbrief-server": "dist/index.js"
   },
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc && node scripts/set-executable.cjs",
+    "prepublishOnly": "npm run build && npm run test",
+    "smoketest": "npm exec -- devbrief --help && npm exec -- devbrief doctor --quiet",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "cli": "tsx src/cli/index.ts",

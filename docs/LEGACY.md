@@ -100,7 +100,7 @@ npx devbrief stack remove express
 
 ### Configuration Files
 
-1. **Stack Track List (`~/.devbrief/stack.json`)**
+1. **Stack Track List (`~/.devbrief/stack-config.json`)**
    ```json
    {
      "libraries": [

@@ -66,10 +66,6 @@ export const typosquattingScanner: Scanner = {
   name: 'typosquatting-detection',
   async scan(context: ProjectContext): Promise<MaintenanceFinding[]> {
     const findings: MaintenanceFinding[] = [];
-    const manifestFiles = context.files.filter((f) =>
-      ['package.json', 'requirements.txt', 'Cargo.toml', 'go.mod'].includes(f)
-    );
-
     const checkPromises = context.dependencies.map(async (dep) => {
       const depName = dep.name.toLowerCase();
 

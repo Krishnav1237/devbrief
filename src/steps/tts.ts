@@ -6,11 +6,9 @@ import * as os from 'node:os';
 import ffmpeg from 'fluent-ffmpeg';
 import {
   StepErrorSchema,
-  type StepError,
 } from '../models/index.js';
 import {
   ClassifiedChangeEntrySchema,
-  type ClassifiedChangeEntry,
 } from './summarize.js';
 
 // ---------------------------------------------------------------------------
@@ -210,7 +208,6 @@ function concatenateAudioFiles(
     // with silence in between.
     const inputs: string[] = [];
     const filterParts: string[] = [];
-    let streamIndex = 0;
 
     // Add all input audio files
     for (const file of inputFiles) {

@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import {
   StepErrorSchema,
-  type StepError,
 } from '../models/index.js';
 import {
   ClassifiedChangeEntrySchema,
-  type ClassifiedChangeEntry,
 } from './summarize.js';
 import { detectTailscaleIP } from '../utils/network.js';
 

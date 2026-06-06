@@ -3,7 +3,6 @@ import axios from 'axios';
 import nodemailer from 'nodemailer';
 import {
   StepErrorSchema,
-  NotificationChannelSchema,
   type StepError,
   type NotificationChannel,
   type SMTPConfig,
@@ -11,7 +10,6 @@ import {
 import { loadNotificationConfig } from '../utils/config-io.js';
 import {
   ClassifiedChangeEntrySchema,
-  type ClassifiedChangeEntry,
 } from './summarize.js';
 
 // ---------------------------------------------------------------------------

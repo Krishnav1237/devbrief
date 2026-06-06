@@ -4,13 +4,11 @@ import {
   ChangeEntrySchema,
   StepErrorSchema,
   type ChangeEntry,
-  type StepError,
 } from '../models/index.js';
 import {
   initStore,
   getExistingEntriesForLibrary,
   storeEntries,
-  updateEntryRisk,
 } from '../utils/store.js';
 import { classifyRisk } from '../utils/risk-classifier.js';
 import { parseDependencies, type ParsedDependency } from '../utils/package-parser.js';
@@ -127,7 +125,7 @@ export const deduplicateStep = {
   }: {
     inputData: DeduplicateInput;
   }): Promise<DeduplicateOutput> => {
-    const { entries, errors, runId, pipelineStatus } = inputData;
+    const { entries, errors, pipelineStatus } = inputData;
 
     // Early-exit propagation
     if (pipelineStatus === 'skip_to_finalize') {

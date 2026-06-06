@@ -540,5 +540,28 @@ describe('maintenance intelligence engine', () => {
     const names = result2.findings.map((f) => f.packageName);
     expect(names.includes('lodash') || result2.findings.length >= 0).toBe(true);
   });
+
+  it('does not flag syntax or node: imports as phantom dependencies', async () => {
+    const dir = fixture();
+    writeJson(join(dir, 'package.json'), {
+      dependencies: {
+        express: '^4.18.2',
+      },
+    });
+
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'app.ts'), [
+      "import express from 'express';",
+      "import * as fs from 'node:fs';", // node: built-in should be ignored
+      "content = content.replace('import (', 'import (\\\\n\\\\t\"os\"');", // string replace shouldn't match
+      "// --import \"file://preload.cjs\" flag comment shouldn't match",
+    ].join('\n'));
+
+    const result = await runMaintenanceScan('doctor', dir);
+    const phantomFindings = result.findings.filter(f => f.id.startsWith('vibe:phantom-dependency:'));
+
+    // Should not find node:, file:, os, or sub-constructs as phantom dependencies
+    expect(phantomFindings.length).toBe(0);
+  });
 });
 
